@@ -14,7 +14,7 @@ __pycache__/
 .coverage
 .coverage.*
 data/
-eval_cls.pytest_cache
+eval_cls.py
 eval.sh
 main.sh
 main.py 
