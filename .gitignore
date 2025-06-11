@@ -14,3 +14,11 @@ __pycache__/
 .coverage
 .coverage.*
 data/
+eval_cls.pytest_cache
+eval.sh
+main.sh
+main.py 
+pipeline.py
+process.py
+test_eval.py 
+test.py 
