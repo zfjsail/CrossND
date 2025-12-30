@@ -57,69 +57,6 @@ class CrossNDEvalPrediction(EvalPrediction):
             self.elements += (self.metadata,)
 
 
-class ResampleCallback(TrainerCallback):
-    """
-    在每个 epoch 结束时重新采样数据的回调，支持分布式训练
-    """
-    def __init__(self, dataset):
-        """
-        初始化回调
-        
-        Args:
-            dataset: CrossNDDataset 实例，用于重新采样
-        """
-        if not isinstance(dataset, CrossNDDataset):
-            raise ValueError("dataset 必须是 CrossNDDataset 的实例")
-        self.dataset = dataset
-    
-    def on_epoch_end(self, args, state, control, **kwargs):
-        """
-        在每个 epoch 结束时调用
-        
-        Args:
-            args: 训练参数
-            state: 训练状态
-            control: 控制对象
-            kwargs: 其他参数
-        """
-        print(f"Epoch {state.epoch} 结束，开始重新采样数据...")
-        
-        # 检查是否在分布式环境中
-        is_distributed = hasattr(args, "local_rank") and dist.is_initialized()
-        is_main_process = not is_distributed or args.local_rank == 0
-        
-        if is_distributed:
-            seed = int(state.epoch * 100000 + state.global_step)
-            
-            # 在主进程中生成随机种子，并广播给所有进程
-            if is_main_process:
-                seed = random.randint(0, 2**31 - 1)
-            
-            # 创建一个张量用于广播
-            seed_tensor = torch.LongTensor([seed]).to(args.device)
-            
-            # 广播种子到所有进程
-            dist.broadcast(seed_tensor, src=0)
-            
-            # 提取种子值并设置随机状态
-            seed = seed_tensor.item()
-            random.seed(seed)
-            np.random.seed(seed)
-            torch.manual_seed(seed)
-            
-            # 同步所有进程
-            dist.barrier()
-        
-        # 现在所有进程都会使用相同的随机种子，生成相同的重采样结果
-        self.dataset.resample_dataset()
-        
-        if is_distributed:
-            # 确保所有进程都完成了重采样
-            dist.barrier()
-        
-        print("数据重新采样完成")
-
-
 def calculate_author_metrics(author_ids, logits, labels):
     """
     按照作者ID计算MAP和AUC指标，使用logits而不是二值预测
@@ -600,27 +537,27 @@ class CrossNDTrainer_v2(Trainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def save_model(self, output_dir=None, _internal_call=False):
-        # if output_dir is None:
-        #     output_dir = self.args.output_dir
-        # self.model.save_pretrained(output_dir)
-        # if self.tokenizer is not None:
-        #     self.tokenizer.save_pretrained(output_dir)
+    # def save_model(self, output_dir=None, _internal_call=False):
+    #     # if output_dir is None:
+    #     #     output_dir = self.args.output_dir
+    #     # self.model.save_pretrained(output_dir)
+    #     # if self.tokenizer is not None:
+    #     #     self.tokenizer.save_pretrained(output_dir)
         
-        output_dir = output_dir if output_dir is not None else self.args.output_dir
-        os.makedirs(output_dir, exist_ok=True)
-        model_to_save = unwrap_model(self.model)
+    #     output_dir = output_dir if output_dir is not None else self.args.output_dir
+    #     os.makedirs(output_dir, exist_ok=True)
+    #     model_to_save = unwrap_model(self.model)
         
-        #for debug
-        state_dict = {}
-        for k,v in model_to_save.named_parameters():
-            for module_to_save in self.modules_to_save:
-                if module_to_save in k:
-                    state_dict[k] = v.to("cpu")
-        torch.save(state_dict, os.path.join(output_dir, WEIGHTS_NAME))
-        if self.tokenizer is not None:
-            self.tokenizer.save_pretrained(output_dir)
-        torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME, ))
+    #     #for debug
+    #     state_dict = {}
+    #     for k,v in model_to_save.named_parameters():
+    #         for module_to_save in self.modules_to_save:
+    #             if module_to_save in k:
+    #                 state_dict[k] = v.to("cpu")
+    #     torch.save(state_dict, os.path.join(output_dir, WEIGHTS_NAME))
+    #     if self.tokenizer is not None:
+    #         self.tokenizer.save_pretrained(output_dir)
+    #     torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME, ))
 
     def evaluation_loop(
         self,
@@ -736,14 +673,7 @@ class CrossNDTrainer_v2(Trainer):
             # 收集metadata
             if "metadata" in inputs:
                 metadata = self.accelerator.gather_for_metrics([inputs["metadata"]])
-                # 确保metadata是CPU数据
-                cpu_metadata = []
-                for m in metadata:
-                    if isinstance(m, torch.Tensor):
-                        cpu_metadata.append(m.cpu().numpy())
-                    else:
-                        cpu_metadata.append(m)
-                all_metadata.append(cpu_metadata)
+                all_metadata.append(metadata)
 
             if is_torch_xla_available():
                 xm.mark_step()
@@ -758,7 +688,7 @@ class CrossNDTrainer_v2(Trainer):
                 labels = self.gather_function(labels)
                 all_labels.append(labels)
             # 每次迭代后强制清理GPU内存
-            del losses, logits, labels, inputs_decode
+            del losses, logits, labels, inputs_decode, metadata
             torch.cuda.empty_cache()
 
             self.control = self.callback_handler.on_prediction_step(args, self.state, self.control)
@@ -782,7 +712,10 @@ class CrossNDTrainer_v2(Trainer):
         # all_labels_np = np.array(all_labels) if all_labels else np.array([])
         # all_losses_np = np.array(all_losses) if all_losses else np.array([])
         # all_inputs_np = np.array(all_inputs) if all_inputs else np.array([])
-        
+        os.makedirs(f'{self.args.output_dir}/res', exist_ok=True)
+        with open(f'{self.args.output_dir}/res/{metric_key_prefix}.pkl','wb') as f:
+            pickle.dump({'all_preds': all_preds, 'all_labels': all_labels, 'all_losses': all_losses, 'all_metadata': all_metadata}, f)
+        # exit(0)
         # Metrics!
         if (
             self.compute_metrics is not None
@@ -835,42 +768,44 @@ def compute_metrics(eval_preds):
     Returns:
         metrics: 包含各项评估指标的字典
     """
-    # 移除调试代码
-    # with open("eval_preds.pkl", "wb") as f:
-    #     pickle.dump(eval_preds, f)
-    
+    def flatten_metadata(meta):
+        result = []
+        if not isinstance(meta, list):
+            # 如果是 dict，直接保存
+            result.append(meta)
+        elif isinstance(meta, list):
+            # 如果是 list，递归处理每个元素
+            for item in meta:
+                result.extend(flatten_metadata(item))
+        # 其他类型忽略
+        return result
     predictions = eval_preds.predictions
     labels = eval_preds.label_ids
     metadata = eval_preds.metadata if hasattr(eval_preds, "metadata") else None
-    
-    # 整理作者ID、预测结果和标签
+
+    predictions = torch.cat(flatten_metadata(predictions)).tolist()
+    labels = torch.cat(flatten_metadata(labels)).tolist()
+    metadata = flatten_metadata(metadata)
+
     author_data = defaultdict(lambda: {'preds': [], 'labels': []})
-    
     # 处理嵌套结构的预测结果、标签和元数据
-    for batch_idx, (batch_preds, batch_labels) in enumerate(zip(predictions, labels)):
-        meta = metadata[batch_idx]
-        
-        for i in range(len(batch_preds)):
-            pred = batch_preds[i]
-            label = batch_labels[i]
+    for pred, label,meta in zip(predictions, labels, metadata):
 
-            while isinstance(meta, list):
-                meta = meta[0]
-
-            aid = meta["aid1"]
-            # 确保pred是标量
-            probs = float(pred)
-            author_data[aid]['preds'].append(probs)
-            author_data[aid]['labels'].append(int(label))
+        aid = meta["aid1"]
+        # 确保pred是标量
+        # if type(probs) == list:
+        #     author_data[aid]['preds'].extend(probs)
+        #     author_data[aid]['labels'].extend(label)
+        # else:
+        author_data[aid]['preds'].append(pred)
+        author_data[aid]['labels'].append(label)
 
     # 计算宏平均AUC和MAP
     maps = []
     aucs = []
     
-    n_authors = 0
-    
     logger.info(f"开始按作者计算指标，共有 {len(author_data)} 个作者")
-    
+    n_authors = 0
     for author_id, data in author_data.items():
         probs = data['preds']
         labels = data['labels']
@@ -879,16 +814,14 @@ def compute_metrics(eval_preds):
         # 根据eval.py的处理方式调整标签和预测值
 
         # 计算正样本比例
+
         pos_ratio = (sum(labels) / len(labels))
         # 跳过正样本比例≥50%或全为负样本的作者
         if pos_ratio == 1 or pos_ratio < 0.5:
             continue
 
         adjusted_probs = [1-p for p in probs]
-        adjusted_labels = [1-l for l in labels]   
-
-
-
+        adjusted_labels = [1-l for l in labels]
         author_ap = average_precision_score(adjusted_labels, adjusted_probs)
         author_auc = roc_auc_score(adjusted_labels, adjusted_probs)
         
@@ -900,10 +833,11 @@ def compute_metrics(eval_preds):
     # 计算最终宏平均
     final_map = sum(maps) / len(maps)
     final_auc = sum(aucs) / len(aucs)
-    
+    auc_map = final_auc+final_map
     return {
         'MAP': float(final_map),
         'AUC': float(final_auc),
+        'AUC_MAP': float(auc_map),
         'n_authors': n_authors
     }
 
@@ -932,6 +866,81 @@ def cal_auc_map(pred,label):
         overall_map+= cur_map
     return overall_auc/num_profile , overall_map/num_profile
 
+class NumTurnScheduler(TrainerCallback):
+    """
+    在每个 epoch 动态调整 dataset 的 num_turn，并限制每个 epoch 的最大训练步数
+    """
+
+    def __init__(self, schedule_type="exponential", max_steps_per_epoch=None, max_num_turn=None):
+        self.schedule_type = schedule_type
+        self.max_steps_per_epoch = max_steps_per_epoch
+        self.internal_epoch =0
+        self.trainer = None
+        # 记录 Epoch 开始时的 step，初始化为 None 以便处理 Resume 情况
+        self.epoch_start_global_step = None 
+        self.max_num_turn = max_num_turn
+    # def on_train_begin(self, args, state, control, **kwargs):
+    #     self.trainer = kwargs.get("trainer")
+
+    #     # --- 修复 Bug 2: 断点续训初始化 ---
+    #     # 如果是断点续训，我们将当前 step 视为该(残缺) epoch 的起点
+    #     # 避免 steps_in_epoch 计算错误导致立即停止
+    #     self.epoch_start_global_step = state.global_step
+
+    #     if state.is_local_process_zero:
+    #         logger.info(
+    #             f"[NumTurnScheduler] 启动 | "
+    #             f"Schedule: {self.schedule_type} | "
+    #             f"Max steps/epoch: {self.max_steps_per_epoch}"
+    #         )
+
+    def on_epoch_begin(self, args, state, control, **kwargs):
+        
+        self.epoch_start_global_step = state.global_step
+        current_seed = args.seed + self.internal_epoch
+        random.seed(current_seed)
+        np.random.seed(current_seed)
+        torch.manual_seed(current_seed)
+        torch.cuda.manual_seed_all(current_seed)
+        
+        # 计算新的 num_turn
+        if self.schedule_type == "exponential":
+            new_num_turn = min(4 ** self.internal_epoch, self.max_num_turn)
+        elif self.schedule_type == "linear":
+            new_num_turn = min(self.internal_epoch + 1, self.max_num_turn)
+        else:
+            raise NotImplementedError(f"Unsupported schedule_type: {self.schedule_type}")
+        self.internal_epoch += 1
+        if new_num_turn == 1:
+            return
+
+        if not self.trainer.train_dataset.num_turn == new_num_turn:
+            self.trainer.train_dataset.rebuild_dataset(new_num_turn)
+            self.trainer._train_dataloader = None
+        
+        if not self.trainer.eval_dataset.num_turn == new_num_turn:
+            self.trainer.eval_dataset.rebuild_dataset(new_num_turn)
+            self.trainer._eval_dataloader = None
+        
+        if hasattr(self.trainer, "accelerator"):
+            self.trainer.accelerator.wait_for_everyone()
+
+
+    def on_step_end(self, args, state, control, **kwargs):
+        # 防御性编程：防止 epoch_start_global_step 为 None
+        start_step = self.epoch_start_global_step if self.epoch_start_global_step is not None else 0
+        steps_in_epoch = state.global_step - start_step
+        if steps_in_epoch >= self.max_steps_per_epoch:
+            # print(f"达到每 epoch 最大步数: {self.max_steps_per_epoch}")
+            if state.is_local_process_zero:
+                logger.info(
+                    f"[NumTurnScheduler] Epoch {state.epoch:.2f} | "
+                    f"达到限制步数 {self.max_steps_per_epoch}，提前结束 Epoch"
+                )
+            control.should_epoch_stop = True
+        return control
+
+
 
 @dataclass
 class DataArguments:
@@ -942,24 +951,29 @@ class DataArguments:
         default="/home/zhipuai/zhangfanjin-15T/pyh/pangyunhe1/git/crossnd-202211/data/kddcup",
         metadata={"help": "数据目录"}
     )
-    num_turn: int = field(
-        default=1,
-        metadata={"help": "对话轮数"}
-    )
+
     apply_chat_template: bool = field(
         default=True,
         metadata={"help": "是否应用聊天模板"}
     )
-    use_outer: bool = field(
-        default=True,
-        metadata={"help": "是否使用外部数据"}
+    dataset: str = field(
+        default = "kddcup"
     )
+
 
 @dataclass
 class ModelArguments:
     """
     LoRA相关的参数
     """
+    src: str = field(
+        default= "/workspace/pangyunhe/project/crossnd/llm/data/alldata_nd_thr09.json",
+        #/workspace/pangyunhe/project/crossnd/llm/data/fuzzyneg.json
+        #/workspace/pangyunhe/project/crossnd/llm/data/fuzzyneg_csics.json
+        #/workspace/pangyunhe/project/crossnd/llm/alldata_nd.json
+        #/workspace/pangyunhe/project/crossnd/llm/alldata_crossnd.json
+        metadata={"help":"数据集"}
+    )
     model_path: str = field(
         default="/workspace/pangyunhe/models/Qwen/Qwen3-4B",
         metadata={"help": "模型路径"}
@@ -985,8 +999,61 @@ class ModelArguments:
         metadata={"help": "任务类型"}
     )
     modules_to_save: List[str] = field(
-        default_factory=lambda: ["score", "embed_tokens"],
+        default_factory=lambda: [],
         metadata={"help": "需要保存的模块"}
+    )
+    loss_type: str = field(
+        default='ce',
+        metadata={"help": "是否使用label smoothing"}
+    )
+    use_binary_head: bool = field(
+        default=False,
+        metadata={"help": "是否使用二分类头"}
+    )
+    use_outer: bool = field(
+        default=True,
+        metadata={"help": "是否使用外部数据"}
+    )
+    num_turn: int = field(
+        default=10,
+        metadata={"help": "对话轮数"}
+    )
+    hybrid_train: bool = field(
+        default=False,
+    )
+    paper_slct_num: int = field(
+        default=100
+    )
+    label_thr: float = field(
+        default=0.9
+    )
+    author_sim: float = field(
+        default=1.0
+    )
+    lora_path: str = field(
+        default=None,
+        metadata={"help": "预训练的LoRA路径"}
+    )
+    max_seq_length: int = field(
+        default=None,
+        metadata={"help": "最大序列长度"}
+    )
+    freeze_header: bool = field(
+        default=True
+    )
+    upsample: bool = field(
+        default=True
+    )
+    use_hybrid_head: bool = field(  
+        default=False
+    )
+    num_turn_schedule_type: str = field(
+        default=None,
+        metadata={"help": "num_turn增长模式: 'exponential'(1,2,4,8...), 'linear'(1,2,3,4...), 'custom'(自定义列表)"}
+    )
+    max_steps_per_epoch: int = field(
+        default=150,
+        metadata={"help": "每个 epoch 最多执行的步数（如果为 None 则不限制）"}
     )
 
 
@@ -1026,3 +1093,4 @@ class ModelArguments:
 #                         print(f"Deleted checkpoint directory: {sub_item_path}")
 #                     except Exception as e:
 #                         print(f"Failed to delete {sub_item_path}. Reason: {e}")
+

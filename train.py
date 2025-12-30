@@ -20,35 +20,24 @@ Fine-tuning the library models for sequence to sequence.
 # You can also adapt this script on your own sequence to sequence task. Pointers for this are left as comments.
 # Adapted from
 
-import shutil
-import pickle
 import logging
 import os
 import sys
-import json
 import transformers
-import numpy as np
 import torch
-from collections import defaultdict
-from sklearn.metrics import average_precision_score, roc_auc_score
 from transformers import (
     AutoConfig,
     AutoTokenizer,
     HfArgumentParser,
     set_seed,
-    TrainerCallback,
-    Seq2SeqTrainingArguments,
-    LlamaTokenizer
 )
-from transformers import TrainingArguments, Trainer, HfArgumentParser
-from trainer import DataArguments, ModelArguments, CrossNDTrainer_v2,compute_metrics
+
+from transformers import TrainingArguments, Trainer,EarlyStoppingCallback
+from trainer import DataArguments, ModelArguments, CrossNDTrainer_v2, compute_metrics, NumTurnScheduler
 
 from peft import get_peft_model, LoraConfig, TaskType, PeftModel
 from utils import *
-from model import Qwen3ForCrossND
-from dataclasses import dataclass, field
-from accelerate import Accelerator
-
+from model import Qwen3ForCrossND, LlamaForCrossND
 
 logging.basicConfig(
     level=logging.INFO,
@@ -84,7 +73,6 @@ def main():
     parser = HfArgumentParser((DataArguments, ModelArguments, TrainingArguments))
     data_args, model_args, training_args = parser.parse_args_into_dataclasses()
     
-    #TODO: add inputs for metrics
     training_args.include_inputs_for_metrics =[]
     training_args.include_for_metrics =["inputs"]
         
@@ -121,11 +109,29 @@ def main():
         dtype = torch.float16
     else:
         dtype = torch.float32
-        
-    tokenizer = AutoTokenizer.from_pretrained(model_args.model_path,  trust_remote_code=True)
-    # from transformers import AutoModel
-    # model = AutoModel.from_pretrained(model_args.model_path, torch_dtype=dtype, trust_remote_code=True,attn_implementation="flash_attention_2").cuda()
-    model = Qwen3ForCrossND.from_pretrained(model_args.model_path, torch_dtype=dtype ,config=config, trust_remote_code=True,attn_implementation="flash_attention_2").cuda()
+            
+    # 根据模型路径选择合适的模型类
+    model_path_lower = model_args.model_path.lower()
+    if "qwen" in model_path_lower:
+        logger.info(f"Initializing Qwen3ForCrossND model from {model_args.model_path}")
+        model = Qwen3ForCrossND.from_pretrained(
+            model_args.model_path, 
+            torch_dtype=dtype,
+            config=config, 
+            trust_remote_code=True,
+            attn_implementation="flash_attention_2"
+        )
+    elif "llama" in model_path_lower:
+        logger.info(f"Initializing LlamaForCrossND model from {model_args.model_path}")
+        model = LlamaForCrossND.from_pretrained(
+            model_args.model_path, 
+            torch_dtype=dtype,
+            config=config, 
+            trust_remote_code=True,
+            attn_implementation="flash_attention_2"
+        )
+    else:
+        raise ValueError(f"Unsupported model type in path: {model_args.model_path}. Path should contain 'qwen' or 'llama'.")
 
     if tokenizer.pad_token is None:
         special_token_dict["pad_token"] = DEFAULT_PAD_TOKEN
@@ -142,34 +148,51 @@ def main():
     )
     model.add_special_tokens(tokenizer)
 
+    if not model_args.freeze_header:
+        model_args.modules_to_save = []#["lm_head", "embed_tokens"]
+    else:
+        model_args.modules_to_save = []
+        
+    if model_args.use_binary_head:
+        if model_args.loss_type == 'ls':
+            model_args.label_type = 'soft'
+        else:
+            model_args.label_type = 'hard'
+        model.monkey_patch_cls_head()
+        # model_args.modules_to_save = ["lm_head", "embed_tokens"]
+    else:
+        model_args.label_type = 'hard'
+        # model_args.modules_to_save = ["lm_head", "embed_tokens"]
+        
     
-    # 创建原始数据集实例
+    model.loss_type = model_args.loss_type
+
     train_dataset = CrossNDDataset(
         data_dir=data_args.data_dir,
         tokenizer=tokenizer,
-        num_turn=data_args.num_turn,
+        model_args = model_args,
+        data_args = data_args,
+        num_turn =1 if model_args.num_turn_schedule_type is not None else model_args.num_turn,
         mode="train",
-        apply_chat_template=data_args.apply_chat_template,
-        use_outer=data_args.use_outer
     )
     
-    # 创建验证数据集实例
     eval_dataset = CrossNDDataset(
         data_dir=data_args.data_dir,
         tokenizer=tokenizer,
-        num_turn=data_args.num_turn,
-        mode="eval",  # 使用评估模式
-        apply_chat_template=data_args.apply_chat_template,
-        use_outer=data_args.use_outer
+        model_args = model_args,
+        data_args = data_args,
+        num_turn =1 if model_args.num_turn_schedule_type is not None else model_args.num_turn,
+        mode="eval",
     )
     test_dataset = CrossNDDataset(
         data_dir=data_args.data_dir,
         tokenizer=tokenizer,
-        num_turn=data_args.num_turn,
+        model_args = model_args,
+        data_args = data_args,
+        num_turn = model_args.num_turn,
         mode="test",
-        apply_chat_template=data_args.apply_chat_template,
-        use_outer=data_args.use_outer
     )
+
     peft_config = LoraConfig(
         r=model_args.lora_r,
         lora_alpha=model_args.lora_alpha,
@@ -179,7 +202,6 @@ def main():
         modules_to_save=model_args.modules_to_save
     )
 
-
     model = get_peft_model(model, peft_config)
     # model.print_trainable_parameters()  # 打印可训练参数信息
     model.gradient_checkpointing_enable()
@@ -188,6 +210,28 @@ def main():
     os.makedirs(training_args.output_dir, exist_ok=True)
     data_collator = CrossNDCollator(tokenizer=tokenizer)
     training_args.remove_unused_columns = False
+    
+    # 初始化回调列表
+    callbacks = []  # EarlyStoppingCallback(early_stopping_patience=3)]
+    if model_args.num_turn_schedule_type is not None:
+        # 添加NumTurnScheduler回调以支持逐epoch增加num_turn
+        num_turn_callback = NumTurnScheduler(
+            schedule_type=model_args.num_turn_schedule_type,
+            max_steps_per_epoch=model_args.max_steps_per_epoch,
+            max_num_turn=model_args.num_turn
+        )
+        callbacks.append(num_turn_callback)
+        logger.info(
+            f"启用NumTurnScheduler - "
+            f"最大num_turn: {model_args.num_turn}, "
+            f"增长模式: {model_args.num_turn_schedule_type}"
+        )
+        if model_args.max_steps_per_epoch is not None:
+            logger.info(
+                f"每 epoch 最多执行 {model_args.max_steps_per_epoch} 步"
+            )
+        
+
     # 创建训练器
     trainer = CrossNDTrainer_v2(
         model=model,
@@ -196,17 +240,41 @@ def main():
         eval_dataset=eval_dataset,
         data_collator=data_collator,
         tokenizer=tokenizer,
-        compute_metrics=compute_metrics
-        # callbacks=[SaveBestCheckpointCallback(training_args.output_dir)]
+        compute_metrics=compute_metrics,
+        callbacks=callbacks
     )
-
     trainer.tokenizer = tokenizer
 
+    if model_args.num_turn_schedule_type is not None:
+        num_turn_callback.trainer = trainer
+    else:
+        num_turn_callback = None
+
     # 开始训练
-    trainer.modules_to_save = model_args.modules_to_save + model_args.target_modules
-    trainer.train()
-    trainer.save_model()
+    trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint) 
+    if hasattr(trainer, "optimizer") and trainer.optimizer is not None:
+        trainer.optimizer.state.clear()  # 先清理状态
+        del trainer.optimizer  # 再删除
+    trainer.optimizer = None
+
+    if hasattr(trainer, "lr_scheduler") and trainer.lr_scheduler is not None:
+        del trainer.lr_scheduler
+    trainer.lr_scheduler = None
+
+    # 2. 清理梯度
+    trainer.model.zero_grad(set_to_none=True)
+    import gc
+    gc.collect()
+
+    # 6. 清空CUDA缓存
+    torch.cuda.empty_cache()
+
+    
+    best_checkpoint = trainer.state.best_model_checkpoint
+    logger.info(f"Best checkpoint: {best_checkpoint}")
+    trainer._load_from_checkpoint(best_checkpoint)
+    
     trainer.predict(test_dataset=test_dataset)
 
 if __name__ == "__main__":
-    main() 
+    main()
