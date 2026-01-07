@@ -7,8 +7,8 @@ from argparse import ArgumentParser
 # python build_model_tokenizer.py --lora_path /workspace/pangyunhe/project/crossnd/llm/output/kddcup/gen_psl_v2_turn_v3/checkpoint-300 --output_dir /workspace/pangyunhe/models/custom/qwen3-8b-multiturn
 parser = ArgumentParser()
 parser.add_argument("--model_path", type=str, default="/workspace/pangyunhe/models/Qwen/Qwen3-8B")
-parser.add_argument("--lora_path", type=str, required=True)
-parser.add_argument("--output_dir", type=str, default= "/workspace/pangyunhe/models/custom/qwen3-8b-multiturn")
+parser.add_argument("--lora_path", type=str, default="/workspace/pangyunhe/project/crossnd/llm/output/kddcup/gen_psl_v2_turn_v3/global_step_140")
+parser.add_argument("--output_dir", type=str, default= "./test")
 args = parser.parse_args()
 
 from utils import (

@@ -6,22 +6,24 @@ pip install -r requirements.txt
 wandb login 14a5316013f658f8ff2f0771a42ee134919be51b
 wandb online
 wandb enabled
-export WANDB_PROJECT=crossnd_ablation
+wandb login 14a5316013f658f8ff2f0771a42ee134919be51b
+
+
+export WANDB_PROJECT=mmga
 # 设置训练设备
-DEEPSPEED_GPUS="localhost:0"
-# DEEPSPEED_GPUS="localhost:0"
+DEEPSPEED_GPUS="localhost:0,1,2,3,4,5,6,7"
+# DEEPSPEED_GPUS="localhost:7"
 # 模型和数据参数
+# MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-4B-Instruct-2507"
 MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-8B"
-DATA_SRC="/workspace/pangyunhe/project/crossnd/llm/data/alldata_nd_thr09.json"
+DATA_SRC="/workspace/pangyunhe/project/crossnd/llm/data/alldata_crossnd.json"
 
 DATA_DIR="/workspace/pangyunhe/project/crossnd/data/datasets--canalpang--crossnd/snapshots/fe8fc58f86dce28120151da0f110e286b947e7ba/kddcup"
-OUTPUT_DIR="output/ablation/cls-hard-outer-hybrid-thr07-sim0"
-RUN_NAME="cls_hard_outer_hybrid_thr07_sim0"
-AUTHOR_SIM=0
+OUTPUT_DIR="output/kddcup/hybrid05_thr07_cls"
+RUN_NAME="hybrid05_thr07_cls"
 LOSS_TYPE="ce"
 NUM_TURN=10
 LABEL_THR=0.7
-
 
 # LoRA配置
 LORA_R=16
@@ -29,7 +31,7 @@ LORA_ALPHA=32
 LORA_DROPOUT=0.05
 
 # 训练参数
-NUM_EPOCHS=2
+NUM_EPOCHS=4
 LEARNING_RATE=2e-5
 WEIGHT_DECAY=0.01
 WARMUP_RATIO=0.1
@@ -39,11 +41,13 @@ GRADIENT_ACCUMULATION=8
 EVAL_STEPS=0.1
 SAVE_STEPS=0.1
 # 运行训练命令
-deepspeed --master_port 29500  --include $DEEPSPEED_GPUS \
+deepspeed --master_port 29505  --include $DEEPSPEED_GPUS \
     train.py \
-    --author_sim $AUTHOR_SIM \
+    --num_turn 10 \
+    --author_sim 0.3 \
+    --max_seq_length 30000 \
     --label_thr $LABEL_THR \
-    --hybrid_train false \
+    --hybrid_train true \
     --paper_slct_num 100 \
     --loss_type $LOSS_TYPE \
     --use_binary_head true \
@@ -63,7 +67,7 @@ deepspeed --master_port 29500  --include $DEEPSPEED_GPUS \
     --gradient_accumulation_steps $GRADIENT_ACCUMULATION \
     --eval_accumulation_steps 1 \
     --run_name $RUN_NAME \
-    --deepspeed "config/ds_zero_1.json" \
+    --deepspeed "config/ds_zero_2.json" \
     --num_train_epochs $NUM_EPOCHS \
     --per_device_train_batch_size $TRAIN_BATCH_SIZE \
     --per_device_eval_batch_size $EVAL_BATCH_SIZE \
@@ -79,7 +83,8 @@ deepspeed --master_port 29500  --include $DEEPSPEED_GPUS \
     --gradient_checkpointing \
     --include_inputs_for_metrics true \
     --remove_unused_columns false \
-    --load_best_model_at_end true \
     --eval_use_gather_object true \
-    --save_total_limit 1 \
-    --bf16 
+    --save_total_limit 2 \
+    --save_only_model true \
+    --dataloader_num_workers 20 \
+    --bf16

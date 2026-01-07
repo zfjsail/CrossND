@@ -36,7 +36,7 @@ from trainer import DataArguments, ModelArguments, CrossNDTrainer_v2, compute_me
 
 from peft import get_peft_model, LoraConfig, TaskType, PeftModel
 from utils import *
-from model import Qwen3ForCrossND, LlamaForCrossND
+from model import Qwen3ForCrossND
 
 logging.basicConfig(
     level=logging.INFO,
@@ -120,15 +120,6 @@ def main():
             trust_remote_code=True,
             attn_implementation="flash_attention_2"
         ).cuda()
-    elif "llama" in model_path_lower:
-        logger.info(f"Initializing LlamaForCrossND model from {model_args.model_path}")
-        model = LlamaForCrossND.from_pretrained(
-            model_args.model_path, 
-            torch_dtype=dtype,
-            config=config, 
-            trust_remote_code=True,
-            attn_implementation="flash_attention_2"
-        ).cuda()
     else:
         raise ValueError(f"Unsupported model type in path: {model_args.model_path}. Path should contain 'qwen' or 'llama'.")
 
@@ -145,22 +136,17 @@ def main():
         tokenizer=tokenizer,
         model=model,
     )
-    model.add_special_tokens(tokenizer)
-    if model_args.use_binary_head:
-        if model_args.loss_type == 'ls':
-            model_args.label_type = 'soft'
-        else:
-            model_args.label_type = 'hard'
-        model.monkey_patch_cls_head(use_hybrid_head=model_args.use_hybrid_head)
-        # model_args.modules_to_save = ["lm_head", "embed_tokens"]
-    else:
-        model_args.label_type = 'hard'
-        # model_args.modules_to_save = ["lm_head", "embed_tokens"]
-    if not model_args.freeze_header:
-        model_args.modules_to_save = ["lm_head", "embed_tokens"]
+    model.YES_TOKEN_IDS, model.NO_TOKEN_IDS = tokenizer.convert_tokens_to_ids(['Yes','No'])
+    model.tokenizer = tokenizer
+    # if not model_args.freeze_header:
+    #     model_args.modules_to_save = []#["lm_head", "embed_tokens"]
+    # else:
+    #     model_args.modules_to_save = []
+    model_args.modules_to_save = []   
+    model.set_header(model_args.use_binary_head)
+    model.set_loss_type(model_args.loss_type)
     model.loss_type = model_args.loss_type
 
-    # 创建原始数据集实例
     train_dataset = CrossNDDataset(
         data_dir=data_args.data_dir,
         tokenizer=tokenizer,
@@ -170,7 +156,6 @@ def main():
         mode="train",
     )
     
-    # 创建验证数据集实例
     eval_dataset = CrossNDDataset(
         data_dir=data_args.data_dir,
         tokenizer=tokenizer,
@@ -194,7 +179,7 @@ def main():
         target_modules=model_args.target_modules,
         lora_dropout=model_args.lora_dropout,
         task_type=model_args.task_type,
-        modules_to_save=model_args.modules_to_save
+        modules_to_save=[]
     )
 
     model = get_peft_model(model, peft_config)
@@ -216,14 +201,8 @@ def main():
         compute_metrics=compute_metrics,
         callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
     )
-
     trainer.tokenizer = tokenizer
 
-    # 开始训练
-    # trainer.train()
-
-    # best_checkpoint = trainer.state.best_model_checkpoint
-    # logger.info(f"Best checkpoint: {best_checkpoint}")
     trainer._load_from_checkpoint(model_args.lora_path)
     
     trainer.predict(test_dataset=test_dataset)

@@ -37,7 +37,7 @@ from trainer import DataArguments, ModelArguments, CrossNDTrainer_v2, compute_me
 
 from peft import get_peft_model, LoraConfig, TaskType, PeftModel
 from utils import *
-from model import Qwen3ForCrossND, LlamaForCrossND
+from model import Qwen3ForCrossND
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,6 +48,7 @@ def smart_tokenizer_and_embedding_resize(
     special_tokens_dict: Dict,
     tokenizer: transformers.PreTrainedTokenizer,
     model: transformers.PreTrainedModel,
+    tokenizer_only: bool = False
 ):
     """Resize tokenizer and embedding.
     From https://github.com/tatsu-lab/stanford_alpaca/blob/main/train.py
@@ -55,6 +56,8 @@ def smart_tokenizer_and_embedding_resize(
     Note: This is the unoptimized version that may make your embedding size not be divisible by 64.
     """
     num_new_tokens = tokenizer.add_special_tokens(special_tokens_dict)
+    if tokenizer_only:
+        return
     model.resize_token_embeddings(len(tokenizer))
 
     if num_new_tokens > 0:
@@ -121,15 +124,15 @@ def main():
             trust_remote_code=True,
             attn_implementation="flash_attention_2"
         )
-    elif "llama" in model_path_lower:
-        logger.info(f"Initializing LlamaForCrossND model from {model_args.model_path}")
-        model = LlamaForCrossND.from_pretrained(
-            model_args.model_path, 
-            torch_dtype=dtype,
-            config=config, 
-            trust_remote_code=True,
-            attn_implementation="flash_attention_2"
-        )
+    # elif "llama" in model_path_lower:
+    #     logger.info(f"Initializing LlamaForCrossND model from {model_args.model_path}")
+    #     model = LlamaForCrossND.from_pretrained(
+    #         model_args.model_path, 
+    #         torch_dtype=dtype,
+    #         config=config, 
+    #         trust_remote_code=True,
+    #         attn_implementation="flash_attention_2"
+    #     )
     else:
         raise ValueError(f"Unsupported model type in path: {model_args.model_path}. Path should contain 'qwen' or 'llama'.")
 
@@ -145,26 +148,23 @@ def main():
         special_tokens_dict=special_token_dict,
         tokenizer=tokenizer,
         model=model,
+        tokenizer_only=model_args.use_label_token
     )
-    model.add_special_tokens(tokenizer)
-
-    if not model_args.freeze_header:
-        model_args.modules_to_save = []#["lm_head", "embed_tokens"]
-    else:
-        model_args.modules_to_save = []
-        
-    if model_args.use_binary_head:
-        if model_args.loss_type == 'ls':
-            model_args.label_type = 'soft'
-        else:
-            model_args.label_type = 'hard'
-        model.monkey_patch_cls_head()
-        # model_args.modules_to_save = ["lm_head", "embed_tokens"]
-    else:
-        model_args.label_type = 'hard'
-        # model_args.modules_to_save = ["lm_head", "embed_tokens"]
-        
-    
+    if model_args.base_model_save_path is not None:
+        os.makedirs(model_args.base_model_save_path, exist_ok=True)
+        model.save_pretrained(model_args.base_model_save_path)
+        tokenizer.save_pretrained(model_args.base_model_save_path)
+        exit(0)
+    # model.add_special_tokens(tokenizer)
+    model.YES_TOKEN_IDS, model.NO_TOKEN_IDS = tokenizer.convert_tokens_to_ids(['Yes','No'])
+    model.tokenizer = tokenizer
+    # if not model_args.freeze_header:
+    #     model_args.modules_to_save = []#["lm_head", "embed_tokens"]
+    # else:
+    #     model_args.modules_to_save = []
+    model_args.modules_to_save = []   
+    model.set_header(model_args.use_binary_head)
+    model.set_loss_type(model_args.loss_type)
     model.loss_type = model_args.loss_type
 
     train_dataset = CrossNDDataset(
@@ -172,7 +172,7 @@ def main():
         tokenizer=tokenizer,
         model_args = model_args,
         data_args = data_args,
-        num_turn =1 if model_args.num_turn_schedule_type is not None else model_args.num_turn,
+        num_turn =1 if model_args.num_turn_schedule_type=="exponential" else model_args.num_turn,
         mode="train",
     )
     
@@ -181,7 +181,7 @@ def main():
         tokenizer=tokenizer,
         model_args = model_args,
         data_args = data_args,
-        num_turn =1 if model_args.num_turn_schedule_type is not None else model_args.num_turn,
+        num_turn =1 if model_args.num_turn_schedule_type=="exponential" else model_args.num_turn,
         mode="eval",
     )
     test_dataset = CrossNDDataset(
@@ -199,7 +199,7 @@ def main():
         target_modules=model_args.target_modules,
         lora_dropout=model_args.lora_dropout,
         task_type=model_args.task_type,
-        modules_to_save=model_args.modules_to_save
+        modules_to_save=[]
     )
 
     model = get_peft_model(model, peft_config)
@@ -230,7 +230,6 @@ def main():
             logger.info(
                 f"每 epoch 最多执行 {model_args.max_steps_per_epoch} 步"
             )
-        
 
     # 创建训练器
     trainer = CrossNDTrainer_v2(
@@ -243,6 +242,16 @@ def main():
         compute_metrics=compute_metrics,
         callbacks=callbacks
     )
+    # trainer = Trainer(
+    #     model=model,
+    #     args=training_args,
+    #     train_dataset=train_dataset,
+    #     eval_dataset=eval_dataset,
+    #     data_collator=data_collator,
+    #     tokenizer=tokenizer,
+    #     compute_metrics=compute_metrics,
+    #     callbacks=callbacks
+    # )
     trainer.tokenizer = tokenizer
 
     if model_args.num_turn_schedule_type is not None:

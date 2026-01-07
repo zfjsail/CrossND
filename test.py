@@ -107,12 +107,42 @@
 #     }
 
 
-from safetensors.torch import load_file
+# from safetensors.torch import load_file
 
-state_dict = load_file("/workspace/pangyunhe/project/crossnd/llm/output/kddcup/gen_psl_v2/checkpoint-240/adapter_model.safetensors")
+# state_dict = load_file("/workspace/pangyunhe/project/crossnd/llm/output/kddcup/gen_psl_v2/checkpoint-240/adapter_model.safetensors")
 
-for key in state_dict.keys():
-    if "lm_head" in key:
-        print(f"{key}: {state_dict[key].shape}")
+# for key in state_dict.keys():
+#     if "lm_head" in key:
+#         print(f"{key}: {state_dict[key].shape}")
 
-breakpoint()
+# breakpoint()
+
+# import pickle
+# data = pickle.load(open("/workspace/pangyunhe/project/crossnd/llm/output/kddcup/gen_label/res/eval.pkl","rb"))
+
+# from trainer import compute_metrics,CrossNDEvalPrediction
+
+
+# # for index, i in enumerate(data['all_labels']):
+# #     if len(i) != len(data['all_preds'][index]):
+# #         breakpoint()
+# #     for j_item in i:
+# #         if j_item!=1 and j_item!=0:
+# #             breakpoint()
+# import torch
+# # breakpoint()
+# # labels = torch.tensor(data['all_labels'])
+# res = compute_metrics(CrossNDEvalPrediction(
+#                     predictions=data['all_preds'], 
+#                     label_ids=data['all_labels'], 
+#                     # inputs=all_inputs_np if all_inputs else None,
+#                     losses=data['all_losses'] if data['all_losses'] else None,
+#                     metadata=data['all_metadata'] if data['all_metadata'] else None    
+# ))
+# breakpoint()
+
+
+
+from transformers import Qwen3ForCausalLM
+model = Qwen3ForCausalLM.from_pretrained('/workspace/pangyunhe/models/custom_qwen',trust_remote_code=True,attn_implementation="flash_attention_2")
+model.save_pretrained('/workspace/pangyunhe/models/custom_qwen')   

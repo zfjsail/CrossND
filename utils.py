@@ -23,10 +23,10 @@ DEFAULT_UNK_TOKEN = "<unk>"
 END_OF_TEXT = '<eot>'
 END_OF_GRAPH = '<eog>'
 END_OF_EMB = '<eoe>'
-TRAINABLE_SPECIAL_TOKENS = [END_OF_TEXT,END_OF_GRAPH,END_OF_EMB,LABEL_TOKEN]
-
-special_token_dict = {'additional_special_tokens':TRAINABLE_SPECIAL_TOKENS+[EMBED_TOKEN,GRAPH_TOKEN]}
-
+# TRAINABLE_SPECIAL_TOKENS = [END_OF_TEXT,END_OF_GRAPH,END_OF_EMB,LABEL_TOKEN]
+TRAINABLE_SPECIAL_TOKENS = [LABEL_TOKEN]
+# special_token_dict = {'additional_special_tokens':TRAINABLE_SPECIAL_TOKENS+[EMBED_TOKEN,GRAPH_TOKEN]}
+special_token_dict = {'additional_special_tokens':TRAINABLE_SPECIAL_TOKENS}
 
 def paper_overlap_ratio(pids1, pids2):
     common_pids = set(pids1) & set(pids2)
@@ -36,7 +36,6 @@ def paper_overlap_ratio(pids1, pids2):
     return min(pubs_overlap_a, pubs_overlap_m), max(pubs_overlap_a, pubs_overlap_m)
 
 def add_author_overlap(data):
-
     all_data = []
     name_aid_to_pids_in = json.load(open("/workspace/pangyunhe/project/crossnd/api/whoiswho/data/whoiswho/name_aid_to_pids_in.json"))
     name_aid_to_pids_out = json.load(open("/workspace/pangyunhe/project/crossnd/api/whoiswho/data/whoiswho/name_aid_to_pids_out.json"))
@@ -55,17 +54,35 @@ def add_author_overlap(data):
         pids1 = name_aid_to_pids_in[name].get(aid,[])
         if len(pids1) < 5:
             continue
-        if pid in mag_name_pid_to_aid.get(name, {}):
-            aid_map = mag_name_pid_to_aid[name][pid]
-            pids_m = name_aid_to_pids_out[name][aid_map]
-            if len(pids_m) < 5:
-                continue        
-            cur_sim, cur_sim_max = paper_overlap_ratio(pids1, pids_m)
+        
+        aid_map = mag_name_pid_to_aid[name][pid]
+        pids_m = name_aid_to_pids_out[name][aid_map]
+        if len(pids_m) < 5:
+            continue        
+        cur_sim, cur_sim_max = paper_overlap_ratio(pids1, pids_m)
         item['author_sim'] = cur_sim
         item['author_sim_max'] = cur_sim_max
         all_data.append(item)
     return all_data
+def add_author_overlap_kddcup(data,in_name2pid,out_name2pid):
 
+    all_data = []
+    similarity_pairs = {}
+    for item in data:
+        pid = item['pid']
+        aid1 = item['aid1']
+        aid2 = item['aid2']
+
+        if f'{aid1}-{aid2}' not in similarity_pairs:
+            cur_sim, cur_sim_max = paper_overlap_ratio(in_name2pid[aid1], out_name2pid[aid2])
+            similarity_pairs[f'{aid1}-{aid2}'] = (cur_sim, cur_sim_max)
+        else:
+            cur_sim, cur_sim_max = similarity_pairs[f'{aid1}-{aid2}']
+            similarity_pairs[f'{aid1}-{aid2}'] = (cur_sim, cur_sim_max)
+        item['author_sim'] = cur_sim
+        item['author_sim_max'] = cur_sim_max
+        all_data.append(item)
+    return all_data
 class CrossNDDataset(Dataset):
     """学者论文异常检测数据集"""
     
@@ -78,8 +95,8 @@ class CrossNDDataset(Dataset):
                  mode = "train",
                  ):
         
-
-        self.label_type = model_args.label_type
+        self.use_label_token = model_args.use_label_token
+        # self.label_type = model_args.label_type
         self.num_turn = num_turn
         self.apply_chat_template = data_args.apply_chat_template
         self.mode = mode.lower()  # 确保模式字符串为小写
@@ -89,20 +106,26 @@ class CrossNDDataset(Dataset):
         self.max_seq_length = model_args.max_seq_length
         # 保存原始的 all_data 用于重新构建数据集时使用
         self.all_data_raw = None
-
+        self.yes_token = "Yes"
+        self.no_token = "No"
+        self.YES_TOKEN_IDS, self.NO_TOKEN_IDS,self.LABEL_TOKEN_IDS = tokenizer.convert_tokens_to_ids([self.yes_token, self.no_token, LABEL_TOKEN])
         if data_args.dataset == 'kddcup':
             in_name2pid = json.load(open('/workspace/pangyunhe/project/crossnd/data/datasets--canalpang--crossnd/snapshots/fe8fc58f86dce28120151da0f110e286b947e7ba/kddcup/aid_to_pids_in.json'))
             out_name2pid = json.load(open('/workspace/pangyunhe/project/crossnd/data/datasets--canalpang--crossnd/snapshots/fe8fc58f86dce28120151da0f110e286b947e7ba/kddcup/aid_to_pids_out.json'))
-            clean_in_name2pid = json.load(open('/workspace/pangyunhe/project/crossnd/api/ark_batch_inf/ind_output/inner_output.json'))
-            clean_out_name2pid = json.load(open('/workspace/pangyunhe/project/crossnd/api/ark_batch_inf/ind_output/outer_output.json'))
-            for k1,v1 in in_name2pid.items():
-                if k1 not in clean_in_name2pid:
-                    clean_in_name2pid[k1] = v1
-            for k1, v1 in out_name2pid.items():
-                if k1 not in clean_out_name2pid:
-                    clean_out_name2pid[k1] = v1
-            self.in_name2pid = clean_in_name2pid
-            self.out_name2pid = clean_out_name2pid
+            if model_args.use_clean_data:
+                clean_in_name2pid = json.load(open('/workspace/pangyunhe/project/crossnd/api/ark_batch_inf/ind_output/inner_output.json'))
+                clean_out_name2pid = json.load(open('/workspace/pangyunhe/project/crossnd/api/ark_batch_inf/ind_output/outer_output.json'))
+                for k1,v1 in in_name2pid.items():
+                    if k1 not in clean_in_name2pid:
+                        clean_in_name2pid[k1] = v1
+                for k1, v1 in out_name2pid.items():
+                    if k1 not in clean_out_name2pid:
+                        clean_out_name2pid[k1] = v1
+                self.in_name2pid = clean_in_name2pid
+                self.out_name2pid = clean_out_name2pid
+            else:
+                self.in_name2pid = in_name2pid
+                self.out_name2pid = out_name2pid
             paper_path = os.path.join(data_dir, "paper_dict_mag.json")
             self.paper_data = json.load(open(paper_path,'r'))
         elif data_args.dataset == 'whoiswho':
@@ -119,20 +142,7 @@ class CrossNDDataset(Dataset):
             self.out_name2pid = flatten_name_dict(self.out_name2pid)
 
         self.data = []
-        # if model_args.hybrid_train:
-        #     self.system_prompt = """你要进行一个学者论文检测的任务, 每个学者有两个源可以使用, 一个是内部源, 另一个是外部源, 使用外部源来支持内部源论文的错误分配检测,每个源是由论文的集合组成的, 每篇论文包题目,学者,机构信息, 现在需要基于两个源进行异常分配的论文检测,即检测给定论文是否应该属于该学者,不属于该学者的论文是异常论文, 现在有一批论文, 你需要根据内部源和外部源的论文与该论文的相似性,来判断该论文是否属于内部源"""
-        #     self.global_prompt = """目标学者名字: {name} 
-        #     内部源: {inner} 
-        #     外部源: {outer} 
-        #     内部源和外部源的相似度是: {author_sim}"""
-        #     if self.apply_chat_template:
-        #         self.user_prompt = """{paper} 是该学者的论文吗? """
-        #         self.assistant_prompt = """{label_token}"""
-        #     else:
-        #         self.multi_turn_prompt = """ {paper} 是该学者的论文。 {label_token}\n"""   
 
-
-        # else:
         if self.use_outer:
             self.system_prompt = """你要进行一个学者论文检测的任务, 每个学者有两个源可以使用, 一个是内部源, 另一个是外部源, 使用外部源来支持内部源论文的错误分配检测,每个源是由论文的集合组成的, 每篇论文包题目,学者,机构信息, 现在需要基于两个源进行异常分配的论文检测,即检测给定论文是否应该属于该学者,不属于该学者的论文是异常论文, 现在有一批论文, 你需要根据内部源和外部源的论文以及两个源的相似性,来判断该论文是否属于内部源"""
             self.global_prompt = """目标学者名字: {name} 
@@ -170,27 +180,29 @@ class CrossNDDataset(Dataset):
                         i['label'] = 1
                     else:
                         i['label'] =0
-            # random.shuffle(data)
-            # all_data = data
             pos = [i for i in data if i['label'] ==1 ]
             neg = [i for i in data if i['label'] ==0 ]
-            if self.model_args.upsample:
-                neg = neg * (len(pos)//len(neg)) # 平衡正负样本
+            neg = neg * (len(pos)//len(neg)) # 平衡正负样本
             all_data = pos + neg
             random.shuffle(all_data)
         elif self.mode == "eval":
             if self.data_args.dataset == "kddcup":
-                data_file = os.path.join(data_dir, "valid_with_sim.json")
-                # data_file = os.path.join(data_dir, "test_with_sim.json")
+                data_file = os.path.join(data_dir, "eval_na_checking_triplets_valid.json")
                 all_data = json.load(open(data_file))
+                if "similarity" not in all_data[0] or "author_sim" not in all_data[0]:
+                    all_data = add_author_overlap_kddcup(all_data,self.in_name2pid,self.out_name2pid)
+                # data_file = os.path.join(data_dir, "test_with_sim.json")
+                
             elif self.data_args.dataset == "whoiswho":
                 all_data =json.load(open("/workspace/pangyunhe/project/crossnd/api/whoiswho/data/whoiswho/eval_na_checking_triplets_valid.json"))
                 if 'author_sim' not in all_data[0]: 
                     all_data = add_author_overlap(all_data)
         else:
             if self.data_args.dataset == "kddcup":
-                data_file = os.path.join(data_dir, "test_with_sim.json")
+                data_file = os.path.join(data_dir, "eval_na_checking_triplets_test.json")
                 all_data = json.load(open(data_file))
+                if "similarity" not in all_data[0] or "author_sim" not in all_data[0]:
+                    all_data = add_author_overlap_kddcup(all_data,self.in_name2pid,self.out_name2pid)
             elif self.data_args.dataset == "whoiswho":
                 all_data =json.load(open("/workspace/pangyunhe/project/crossnd/api/whoiswho/data/whoiswho/eval_na_checking_triplets_test.json"))
                 if 'author_sim' not in all_data[0]:
@@ -283,16 +295,16 @@ class CrossNDDataset(Dataset):
             raise ValueError('no similarity found')
         
 
-        if self.model_args.label_type == 'soft' and self.mode == 'train':
-            label_list = [i['soft_label'] for i in data]
-            labels = torch.tensor(label_list, dtype=torch.float)
+        # if self.model_args.label_type == 'soft' and self.mode == 'train':
+        #     label_list = [i['soft_label'] for i in data]
+        #     labels = torch.tensor(label_list, dtype=torch.float)
         # elif self.model_args.label_thr is not None and self.mode == 'train':
         #     label_list = [i['soft_label'] for i in data]
         #     label_list = [1 if i>self.model_args.label_thr else 0 for i in label_list]
         #     labels = torch.tensor(label_list, dtype=torch.long)
-        else: 
-            label_list = [i['label'] for i in data]
-            labels = torch.tensor(label_list, dtype=torch.long)
+        # else: 
+        label_list = [i['label'] for i in data]
+        labels = torch.tensor(label_list, dtype=torch.long)
         def fetch_paper_id(src_id):
             return src_id.split('-')[0]
         # 获取论文信息
@@ -354,6 +366,7 @@ class CrossNDDataset(Dataset):
             # 第一轮对话
             first_paper_prompt = global_prompt + self.user_prompt.format(paper=self._fetch_single_paper_input(papers[0]))
             chat.append({"role": "user", "content": first_paper_prompt})
+
             chat.append({"role": "assistant", "content": self.assistant_prompt.format(label_token=LABEL_TOKEN)})
             
             # 如果有多轮对话，添加后续轮次
@@ -362,7 +375,6 @@ class CrossNDDataset(Dataset):
                 chat.append({"role": "assistant", "content": self.assistant_prompt.format(label_token=LABEL_TOKEN)})
             # 应用聊天模板
             inputs = self.tokenizer.apply_chat_template(chat,return_tensors="pt")
-            breakpoint()
             # 确保attention_mask与input_ids形状一致
             attention_mask = torch.ones_like(inputs, dtype=torch.long)
 
@@ -370,28 +382,21 @@ class CrossNDDataset(Dataset):
             # ### 将label_token的位置的attention_mask设置为0
             # label_token_id = self.tokenizer.convert_tokens_to_ids(LABEL_TOKEN)
             # attention_mask[inputs['input_ids'] == label_token_id] = 0
+            label_pos_mask = inputs.squeeze() == self.LABEL_TOKEN_IDS
+            prefilled_labels = torch.full_like(inputs, -100).squeeze()
+            label_values = torch.tensor([self.YES_TOKEN_IDS if label == 1 else self.NO_TOKEN_IDS for label in labels])
+            prefilled_labels[label_pos_mask] = label_values
+            if not self.use_label_token:
+                inputs[label_pos_mask.unsqueeze(0)] = label_values
+            assert self.YES_TOKEN_IDS in prefilled_labels or self.NO_TOKEN_IDS in prefilled_labels, "label_token is not in the inputs"
+            inputs = {"input_ids":inputs,"attention_mask":attention_mask} 
 
-
-            inputs = {"input_ids":inputs,"attention_mask":attention_mask}
         else:
-            # 不使用聊天模板的情况
-            inputs = self.system_prompt + "\n"
-            inputs += self.global_prompt.format(**{ 
-                "name": name,
-                "inner": inner, 
-                "outer": outer
-            })
-            
-            # 添加所有论文
-            for paper in papers:
-                inputs += self.multi_turn_prompt.format(paper=self._fetch_single_paper_input(paper), label_token=LABEL_TOKEN)
-            
-            inputs = self.tokenizer.encode_plus(inputs, return_tensors="pt", truncation=False, padding=False)
-        # include metadata to calculate similarity and etc
+            raise ValueError('apply_chat_template is not True')
         return {
             "input_ids": inputs["input_ids"],
             "attention_mask": inputs["attention_mask"],
-            "labels": labels.unsqueeze(0) if labels.dim() == 1 else labels,
+            "labels": prefilled_labels.unsqueeze(0) if prefilled_labels.dim() == 1 else prefilled_labels,
             "metadata": data
         }
 

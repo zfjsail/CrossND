@@ -685,7 +685,12 @@ class CrossNDTrainer_v2(Trainer):
                 logits = self.gather_function(logits)
                 all_preds.append(logits)
             if labels is not None:
-                labels = self.gather_function(labels)
+                if -100 in labels:
+                    labels = labels[labels != -100]
+                #将yes_token_id 和no_token_id 转换为1和0
+                labels[labels == self.model.YES_TOKEN_IDS] = 1
+                labels[labels == self.model.NO_TOKEN_IDS] = 0
+                labels = self.gather_function(torch.tensor(labels).tolist())
                 all_labels.append(labels)
             # 每次迭代后强制清理GPU内存
             del losses, logits, labels, inputs_decode, metadata
@@ -784,7 +789,10 @@ def compute_metrics(eval_preds):
     metadata = eval_preds.metadata if hasattr(eval_preds, "metadata") else None
 
     predictions = torch.cat(flatten_metadata(predictions)).tolist()
-    labels = torch.cat(flatten_metadata(labels)).tolist()
+    try:
+        labels = torch.cat(flatten_metadata(labels)).tolist()
+    except:
+        labels = flatten_metadata(labels)
     metadata = flatten_metadata(metadata)
 
     author_data = defaultdict(lambda: {'preds': [], 'labels': []})
@@ -905,9 +913,11 @@ class NumTurnScheduler(TrainerCallback):
         
         # 计算新的 num_turn
         if self.schedule_type == "exponential":
-            new_num_turn = min(4 ** self.internal_epoch, self.max_num_turn)
+            new_num_turn = min(2 ** self.internal_epoch, self.max_num_turn)
         elif self.schedule_type == "linear":
             new_num_turn = min(self.internal_epoch + 1, self.max_num_turn)
+        elif self.schedule_type == "constant":
+            new_num_turn = self.max_num_turn
         else:
             raise NotImplementedError(f"Unsupported schedule_type: {self.schedule_type}")
         self.internal_epoch += 1
@@ -966,6 +976,10 @@ class ModelArguments:
     """
     LoRA相关的参数
     """
+    use_label_token: bool = field(
+        default=True,
+        metadata={"help": "是否使用label token"}
+    )
     src: str = field(
         default= "/workspace/pangyunhe/project/crossnd/llm/data/alldata_nd_thr09.json",
         #/workspace/pangyunhe/project/crossnd/llm/data/fuzzyneg.json
@@ -1028,7 +1042,7 @@ class ModelArguments:
         default=0.9
     )
     author_sim: float = field(
-        default=1.0
+        default=0.5
     )
     lora_path: str = field(
         default=None,
@@ -1041,9 +1055,6 @@ class ModelArguments:
     freeze_header: bool = field(
         default=True
     )
-    upsample: bool = field(
-        default=True
-    )
     use_hybrid_head: bool = field(  
         default=False
     )
@@ -1054,6 +1065,18 @@ class ModelArguments:
     max_steps_per_epoch: int = field(
         default=150,
         metadata={"help": "每个 epoch 最多执行的步数（如果为 None 则不限制）"}
+    )
+    use_similarity: bool = field(
+        default=True,
+        metadata={"help": "是否使用相似性"}
+    )
+    use_clean_data: bool = field(
+        default=True,
+        metadata={"help": "是否使用clean data"}
+    )
+    base_model_save_path : str = field(
+        default=None,
+        metadata={"help": "base model save path"}
     )
 
 

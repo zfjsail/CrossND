@@ -43,7 +43,7 @@ SAVE_STEPS=0.1
 deepspeed --master_port 29505  --include $DEEPSPEED_GPUS \
     train_wo_token.py \
     --upsample true \
-    --max_seq_length 15000 \
+    --max_seq_length 22000 \
     --label_thr $LABEL_THR \
     --hybrid_train false \
     --paper_slct_num 100 \
