@@ -11,9 +11,7 @@ import copy
 from collections import defaultdict
 
 LABEL_TOKEN = '<label_token>'
-# LABEL_TOKEN = "<|fim_middle|>"
-EMBED_TOKEN = '<emb_token>'
-GRAPH_TOKEN = '<graph_token>' 
+
 DEFAULT_PAD_TOKEN = "[PAD]"
 DEFAULT_EOS_TOKEN = "</s>"
 DEFAULT_BOS_TOKEN = "<s>"
@@ -23,9 +21,7 @@ DEFAULT_UNK_TOKEN = "<unk>"
 END_OF_TEXT = '<eot>'
 END_OF_GRAPH = '<eog>'
 END_OF_EMB = '<eoe>'
-# TRAINABLE_SPECIAL_TOKENS = [END_OF_TEXT,END_OF_GRAPH,END_OF_EMB,LABEL_TOKEN]
 TRAINABLE_SPECIAL_TOKENS = [LABEL_TOKEN]
-# special_token_dict = {'additional_special_tokens':TRAINABLE_SPECIAL_TOKENS+[EMBED_TOKEN,GRAPH_TOKEN]}
 special_token_dict = {'additional_special_tokens':TRAINABLE_SPECIAL_TOKENS}
 
 def paper_overlap_ratio(pids1, pids2):
@@ -52,13 +48,15 @@ def add_author_overlap(data):
         aid = item['aid1']
         name = item['name']
         pids1 = name_aid_to_pids_in[name].get(aid,[])
-        if len(pids1) < 5:
-            continue
-        
-        aid_map = mag_name_pid_to_aid[name][pid]
-        pids_m = name_aid_to_pids_out[name][aid_map]
-        if len(pids_m) < 5:
-            continue        
+        # if len(pids1) < 5:
+        #     continue
+        try:
+            aid_map = mag_name_pid_to_aid[name][pid]
+            pids_m = name_aid_to_pids_out[name][aid_map]
+            # if len(pids_m) < 5:
+            #     continue  
+        except:
+            continue      
         cur_sim, cur_sim_max = paper_overlap_ratio(pids1, pids_m)
         item['author_sim'] = cur_sim
         item['author_sim_max'] = cur_sim_max
@@ -207,12 +205,6 @@ class CrossNDDataset(Dataset):
                 all_data =json.load(open("/workspace/pangyunhe/project/crossnd/api/whoiswho/data/whoiswho/eval_na_checking_triplets_test.json"))
                 if 'author_sim' not in all_data[0]:
                     all_data = add_author_overlap(all_data)
-        # for i in all_data:
-        #     if 'author_sim' not in i:
-        #         breakpoint()
-        #     elif i['author_sim'] == None:
-        #         breakpoint()
-
         # 保存原始 all_data 用于后续重新构建
         self.all_data_raw = copy.deepcopy(all_data)
 
@@ -294,15 +286,6 @@ class CrossNDDataset(Dataset):
         else:
             raise ValueError('no similarity found')
         
-
-        # if self.model_args.label_type == 'soft' and self.mode == 'train':
-        #     label_list = [i['soft_label'] for i in data]
-        #     labels = torch.tensor(label_list, dtype=torch.float)
-        # elif self.model_args.label_thr is not None and self.mode == 'train':
-        #     label_list = [i['soft_label'] for i in data]
-        #     label_list = [1 if i>self.model_args.label_thr else 0 for i in label_list]
-        #     labels = torch.tensor(label_list, dtype=torch.long)
-        # else: 
         label_list = [i['label'] for i in data]
         labels = torch.tensor(label_list, dtype=torch.long)
         def fetch_paper_id(src_id):
@@ -310,9 +293,11 @@ class CrossNDDataset(Dataset):
         # 获取论文信息
         pids = [fetch_paper_id(i['pid']) for i in data]
         papers = [self.paper_data[i] for i in pids]
-
+        
         papers_in = [i for i in self.in_name2pid[aid1] if i != data[0]['pid']]
         inner_papers = [self.paper_data[fetch_paper_id(i)] for i in papers_in]
+        random.shuffle(inner_papers)
+
         selected_inner_papers = self._select_related_papers(papers[0], inner_papers, type='random',num=self.model_args.paper_slct_num)
         inner = "\n".join([self._fetch_single_paper_input(paper) for paper in selected_inner_papers])
         if self.use_outer and aid2 is not None:
@@ -320,11 +305,9 @@ class CrossNDDataset(Dataset):
             or (not self.model_args.hybrid_train):
                 papers_out = [i for i in self.out_name2pid[aid2] if i != data[0]['pid']]
                 outer_papers = [self.paper_data[fetch_paper_id(i)] for i in papers_out]
-                # selected_outer_papers = self._select_related_papers(papers[0], outer_papers, type='random',num=self.model_args.paper_slct_num)
+                random.shuffle(outer_papers)
                 selected_outer_papers = self._select_related_papers(papers[0], outer_papers, type='random',num=self.model_args.paper_slct_num)
                 outer_papers = [self._fetch_single_paper_input(paper) for paper in selected_outer_papers]
-                
-
                 pred_paper_inputs_len = len(self.tokenizer(' ; '.join([self._fetch_single_paper_input(paper) for paper in papers]))['input_ids'])
 
                 if self.max_seq_length is None:
@@ -348,7 +331,7 @@ class CrossNDDataset(Dataset):
         else:
             outer = None
             similarity = None
-
+    
         # 构建模型输入
         if self.apply_chat_template:
             chat = []
@@ -390,7 +373,6 @@ class CrossNDDataset(Dataset):
                 inputs[label_pos_mask.unsqueeze(0)] = label_values
             assert self.YES_TOKEN_IDS in prefilled_labels or self.NO_TOKEN_IDS in prefilled_labels, "label_token is not in the inputs"
             inputs = {"input_ids":inputs,"attention_mask":attention_mask} 
-
         else:
             raise ValueError('apply_chat_template is not True')
         return {
@@ -400,11 +382,15 @@ class CrossNDDataset(Dataset):
             "metadata": data
         }
 
-    def _fetch_single_paper_input(self, paper, feature = 'title_author_org'):
+    def _fetch_single_paper_input(self, paper, feature = 'title_year_author_org'):
         """获取单个论文的文本表示"""
         text = ""
         text += f"标题: {paper['title']}\n"
         authors_list = paper['authors']
+        text += f"年份: {paper['year']}\n"
+        if paper.get('venue',None) is not None:
+            text += f"会议: {paper.get('venue')}\n"
+
         if "AuthorSequenceNumber" in authors_list[0]:
             authors_list = sorted(authors_list, key=lambda x: x['AuthorSequenceNumber']) 
         # sorted_data = sorted(authors_list, key=lambda x: x['AuthorSequenceNumber'])

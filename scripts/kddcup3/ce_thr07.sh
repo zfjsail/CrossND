@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# 使用 NumTurnScheduler 的训练脚本
-# num_turn 会根据调度从 1 按指数增长到最大值
-
 # 设置工作目录
 cd /workspace/pangyunhe/project/crossnd/llm
 pip install -r requirements.txt
@@ -11,27 +8,27 @@ wandb online
 wandb enabled
 wandb login 14a5316013f658f8ff2f0771a42ee134919be51b
 
-export WANDB_PROJECT=crossnd_kddcup
+export WANDB_PROJECT=mmga
 # 设置训练设备
-DEEPSPEED_GPUS="localhost:4,5,6,7"
-# DEEPSPEED_GPUS="localhost:3"
+DEEPSPEED_GPUS="localhost:0,1,2,3,4,5,6,7"
+# DEEPSPEED_GPUS="localhost:7"
 # 模型和数据参数
 # MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-4B-Instruct-2507"
 MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-8B"
-DATA_SRC="/workspace/pangyunhe/project/crossnd/llm/data/alldata_nd_thr09_inout_sim.json"
+DATA_SRC="/workspace/pangyunhe/project/crossnd/llm/data/all_data_claude05.json"
 
 DATA_DIR="/workspace/pangyunhe/project/crossnd/data/datasets--canalpang--crossnd/snapshots/fe8fc58f86dce28120151da0f110e286b947e7ba/kddcup"
-OUTPUT_DIR="output/kddcup/train_with_scheduler"
-RUN_NAME="train_with_num_turn_scheduler"
+OUTPUT_DIR="output/kddcup/hybrid_thr07_cls_claude"
+RUN_NAME="hybrid_thr07_cls_claude"
 LOSS_TYPE="ce"
-NUM_TURN=16
-LABEL_THR=0.9
+NUM_TURN=10
+LABEL_THR=0.7
 
 # LoRA配置
-LORA_R=32
-LORA_ALPHA=64
+LORA_R=16
+LORA_ALPHA=32
 LORA_DROPOUT=0.05
-
+ 
 # 训练参数
 NUM_EPOCHS=4
 LEARNING_RATE=2e-5
@@ -42,20 +39,17 @@ EVAL_BATCH_SIZE=1
 GRADIENT_ACCUMULATION=8
 EVAL_STEPS=0.1
 SAVE_STEPS=0.1
-
 # 运行训练命令
 deepspeed --master_port 29505  --include $DEEPSPEED_GPUS \
     train.py \
-    --upsample true \
-    --max_seq_length 10000 \
+    --num_turn 10 \
+    --max_seq_length 30000 \
     --label_thr $LABEL_THR \
-    --hybrid_train false \
-    --paper_slct_num 80 \
+    --hybrid_train true \
+    --paper_slct_num 100 \
     --loss_type $LOSS_TYPE \
-    --use_binary_head false \
+    --use_binary_head true \
     --use_outer true \
-    --use_num_turn_scheduler true \
-    --num_turn_schedule_type exponential \
     --src $DATA_SRC \
     --model_path $MODEL_PATH \
     --data_dir $DATA_DIR \
@@ -63,7 +57,6 @@ deepspeed --master_port 29505  --include $DEEPSPEED_GPUS \
     --lora_alpha $LORA_ALPHA \
     --lora_dropout $LORA_DROPOUT \
     --output_dir $OUTPUT_DIR \
-    --do_train \
     --do_eval \
     --num_turn $NUM_TURN \
     --eval_strategy steps \
@@ -83,7 +76,7 @@ deepspeed --master_port 29505  --include $DEEPSPEED_GPUS \
     --lr_scheduler_type cosine \
     --warmup_ratio 0.1 \
     --save_strategy steps \
-    --metric_for_best_model AUC_MAP \
+    --metric_for_best_model MAP \
     --greater_is_better true \
     --gradient_checkpointing \
     --include_inputs_for_metrics true \
@@ -91,6 +84,4 @@ deepspeed --master_port 29505  --include $DEEPSPEED_GPUS \
     --eval_use_gather_object true \
     --save_total_limit 2 \
     --save_only_model true \
-    --dataloader_num_workers 20 \
-    --bf16 
-
+    --bf16

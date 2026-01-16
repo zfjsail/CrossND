@@ -37,7 +37,7 @@ from trainer import DataArguments, ModelArguments, CrossNDTrainer_v2, compute_me
 
 from peft import get_peft_model, LoraConfig, TaskType, PeftModel
 from utils import *
-from model import Qwen3ForCrossND
+from model import Qwen3ForCrossND,LlamaForCrossND
 
 logging.basicConfig(
     level=logging.INFO,
@@ -124,26 +124,26 @@ def main():
             trust_remote_code=True,
             attn_implementation="flash_attention_2"
         )
-    # elif "llama" in model_path_lower:
-    #     logger.info(f"Initializing LlamaForCrossND model from {model_args.model_path}")
-    #     model = LlamaForCrossND.from_pretrained(
-    #         model_args.model_path, 
-    #         torch_dtype=dtype,
-    #         config=config, 
-    #         trust_remote_code=True,
-    #         attn_implementation="flash_attention_2"
-    #     )
+    elif "llama" in model_path_lower:
+        logger.info(f"Initializing LlamaForCrossND model from {model_args.model_path}")
+        model = LlamaForCrossND.from_pretrained(
+            model_args.model_path, 
+            torch_dtype=dtype,
+            config=config, 
+            trust_remote_code=True,
+            attn_implementation="flash_attention_2"
+        )
     else:
         raise ValueError(f"Unsupported model type in path: {model_args.model_path}. Path should contain 'qwen' or 'llama'.")
 
-    if tokenizer.pad_token is None:
-        special_token_dict["pad_token"] = DEFAULT_PAD_TOKEN
-    if tokenizer.eos_token is None:
-        special_token_dict["eos_token"] = DEFAULT_EOS_TOKEN
-    if tokenizer.bos_token is None:
-        special_token_dict["bos_token"] = DEFAULT_BOS_TOKEN
-    if tokenizer.unk_token is None:
-        special_token_dict["unk_token"] = DEFAULT_UNK_TOKEN
+    # if tokenizer.pad_token is None:
+    #     special_token_dict["pad_token"] = DEFAULT_PAD_TOKEN
+    # if tokenizer.eos_token is None:
+    #     special_token_dict["eos_token"] = DEFAULT_EOS_TOKEN
+    # if tokenizer.bos_token is None:
+    #     special_token_dict["bos_token"] = DEFAULT_BOS_TOKEN
+    # if tokenizer.unk_token is None:
+    #     special_token_dict["unk_token"] = DEFAULT_UNK_TOKEN
     smart_tokenizer_and_embedding_resize(
         special_tokens_dict=special_token_dict,
         tokenizer=tokenizer,
@@ -260,7 +260,7 @@ def main():
         num_turn_callback = None
 
     # 开始训练
-    trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint) 
+    trainer.train() 
     if hasattr(trainer, "optimizer") and trainer.optimizer is not None:
         trainer.optimizer.state.clear()  # 先清理状态
         del trainer.optimizer  # 再删除

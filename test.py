@@ -20,92 +20,91 @@
 # #     ],
 # # )
 # # print(response.choices[0].message)
-# import torch
-# import pickle
-# data = pickle.load(open('/workspace/pangyunhe/project/crossnd/llm/res.pkl','rb'))
-# from collections import defaultdict
-# from sklearn.metrics import roc_auc_score, average_precision_score
+import torch
+import pickle
+data = pickle.load(open('/workspace/pangyunhe/project/crossnd/llm/output/kddcup_claude/hybrid_thr09_cls_claude/res/test.pkl','rb'))
+from collections import defaultdict
+from sklearn.metrics import roc_auc_score, average_precision_score
 
-# def compute_metrics(predictions, labels, metadata):
-#     """
-#     计算评估指标，使用metadata和预测结果
+def compute_metrics(predictions, labels, metadata):
+    """
+    计算评估指标，使用metadata和预测结果
     
-#     Args:
-#         eval_preds: 包含预测结果、标签和metadata的CrossNDEvalPrediction对象
+    Args:
+        eval_preds: 包含预测结果、标签和metadata的CrossNDEvalPrediction对象
         
-#     Returns:
-#         metrics: 包含各项评估指标的字典
-#     """
-#     def flatten_metadata(meta):
-#         result = []
-#         if not isinstance(meta, list):
-#             # 如果是 dict，直接保存
-#             result.append(meta)
-#         elif isinstance(meta, list):
-#             # 如果是 list，递归处理每个元素
-#             for item in meta:
-#                 result.extend(flatten_metadata(item))
-#         # 其他类型忽略
-#         return result
-#     predictions = torch.cat(flatten_metadata(predictions)).tolist()
-#     labels = torch.cat(flatten_metadata(labels)).tolist()
-#     metadata = flatten_metadata(metadata)
-#     author_data = defaultdict(lambda: {'preds': [], 'labels': []})
-#     # 处理嵌套结构的预测结果、标签和元数据
-#     for pred, label,meta in zip(predictions, labels, metadata):
+    Returns:
+        metrics: 包含各项评估指标的字典
+    """
+    def flatten_metadata(meta):
+        result = []
+        if not isinstance(meta, list):
+            # 如果是 dict，直接保存
+            result.append(meta)
+        elif isinstance(meta, list):
+            # 如果是 list，递归处理每个元素
+            for item in meta:
+                result.extend(flatten_metadata(item))
+        # 其他类型忽略
+        return result
+    predictions = torch.cat(flatten_metadata(predictions)).tolist()
+    labels = torch.cat(flatten_metadata(labels)).tolist()
+    metadata = flatten_metadata(metadata)
+    author_data = defaultdict(lambda: {'preds': [], 'labels': []})
+    # 处理嵌套结构的预测结果、标签和元数据
+    for pred, label,meta in zip(predictions, labels, metadata):
 
-#         aid = meta["aid1"]
-#         # 确保pred是标量
-#         # if type(probs) == list:
-#         #     author_data[aid]['preds'].extend(probs)
-#         #     author_data[aid]['labels'].extend(label)
-#         # else:
-#         author_data[aid]['preds'].append(pred)
-#         author_data[aid]['labels'].append(label)
+        aid = meta["aid1"]
+        # 确保pred是标量
+        # if type(probs) == list:
+        #     author_data[aid]['preds'].extend(probs)
+        #     author_data[aid]['labels'].extend(label)
+        # else:
+        author_data[aid]['preds'].append(pred)
+        author_data[aid]['labels'].append(label)
 
-#     # 计算宏平均AUC和MAP
-#     maps = []
-#     aucs = []
+    # 计算宏平均AUC和MAP
+    maps = []
+    aucs = []
     
-#     print(f"开始按作者计算指标，共有 {len(author_data)} 个作者")
+    print(f"开始按作者计算指标，共有 {len(author_data)} 个作者")
     
-#     for author_id, data in author_data.items():
-#         probs = data['preds']
-#         labels = data['labels']
+    for author_id, data in author_data.items():
+        probs = data['preds']
+        labels = data['labels']
           
-#         # 注意：原始标签中1表示正样本，0表示负样本
-#         # 根据eval.py的处理方式调整标签和预测值
+        # 注意：原始标签中1表示正样本，0表示负样本
+        # 根据eval.py的处理方式调整标签和预测值
 
-#         # 计算正样本比例
+        # 计算正样本比例
 
-#         pos_ratio = (sum(labels) / len(labels))
-#         # 跳过正样本比例≥50%或全为负样本的作者
-#         if pos_ratio == 1 or pos_ratio < 0.5:
-#             continue
+        pos_ratio = (sum(labels) / len(labels))
+        # 跳过正样本比例≥50%或全为负样本的作者
+        if pos_ratio == 1 or pos_ratio < 0.5:
+            continue
 
-#         adjusted_probs = [1-p for p in probs]
-#         adjusted_labels = [1-l for l in labels]   
+        adjusted_probs = [1-p for p in probs]
+        adjusted_labels = [1-l for l in labels]   
 
-
-
-#         author_ap = average_precision_score(adjusted_labels, adjusted_probs)
-#         author_auc = roc_auc_score(adjusted_labels, adjusted_probs)
+        author_ap = average_precision_score(adjusted_labels, adjusted_probs)
+        author_auc = roc_auc_score(adjusted_labels, adjusted_probs)
         
-#         maps.append(author_ap)
-#         aucs.append(author_auc)
-#         n_authors += 1
+        maps.append(author_ap)
+        aucs.append(author_auc)
+        n_authors += 1
 
-#     print(f"完成评估的有效作者数量: {n_authors}")
-#     # 计算最终宏平均
-#     final_map = sum(maps) / len(maps)
-#     final_auc = sum(aucs) / len(aucs)
+    print(f"完成评估的有效作者数量: {n_authors}")
+    # 计算最终宏平均
+    final_map = sum(maps) / len(maps)
+    final_auc = sum(aucs) / len(aucs)
     
-#     return {
-#         'MAP': float(final_map),
-#         'AUC': float(final_auc),
-#         'n_authors': n_authors
-#     }
-
+    return {
+        'MAP': float(final_map),
+        'AUC': float(final_auc),
+        'n_authors': n_authors
+    }
+breakpoint()
+print(compute_metrics(data['all_preds'], data['all_labels'], data['all_metadata']))
 
 # from safetensors.torch import load_file
 
@@ -141,8 +140,6 @@
 # ))
 # breakpoint()
 
-
-
-from transformers import Qwen3ForCausalLM
-model = Qwen3ForCausalLM.from_pretrained('/workspace/pangyunhe/models/custom_qwen',trust_remote_code=True,attn_implementation="flash_attention_2")
-model.save_pretrained('/workspace/pangyunhe/models/custom_qwen')   
+# from transformers import Qwen3ForCausalLM
+# model = Qwen3ForCausalLM.from_pretrained('/workspace/pangyunhe/models/custom_qwen',trust_remote_code=True,attn_implementation="flash_attention_2")
+# model.save_pretrained('/workspace/pangyunhe/models/custom_qwen')   

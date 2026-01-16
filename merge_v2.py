@@ -17,7 +17,6 @@ def main():
         base_model_path,
         trust_remote_code=True
     )
-
     # 2. 加载 base model
     base_model = AutoModelForCausalLM.from_pretrained(
         base_model_path,

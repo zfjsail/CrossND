@@ -10,22 +10,22 @@ from typing import List, Dict, Any, Optional, Union, Tuple
 import copy
 from collections import defaultdict
 
-LABEL_TOKEN = '<label_token>'
-# LABEL_TOKEN = "<|fim_middle|>"
-EMBED_TOKEN = '<emb_token>'
-GRAPH_TOKEN = '<graph_token>' 
-DEFAULT_PAD_TOKEN = "[PAD]"
-DEFAULT_EOS_TOKEN = "</s>"
-DEFAULT_BOS_TOKEN = "<s>"
-DEFAULT_UNK_TOKEN = "<unk>"
+# LABEL_TOKEN = '<label_token>'
+# # LABEL_TOKEN = "<|fim_middle|>"
+# EMBED_TOKEN = '<emb_token>'
+# GRAPH_TOKEN = '<graph_token>' 
+# DEFAULT_PAD_TOKEN = "[PAD]"
+# DEFAULT_EOS_TOKEN = "</s>"
+# DEFAULT_BOS_TOKEN = "<s>"
+# DEFAULT_UNK_TOKEN = "<unk>"
 
-#TO BE ADDED
-END_OF_TEXT = '<eot>'
-END_OF_GRAPH = '<eog>'
-END_OF_EMB = '<eoe>'
-TRAINABLE_SPECIAL_TOKENS = [END_OF_TEXT,END_OF_GRAPH,END_OF_EMB,LABEL_TOKEN]
+# #TO BE ADDED
+# END_OF_TEXT = '<eot>'
+# END_OF_GRAPH = '<eog>'
+# END_OF_EMB = '<eoe>'
+# TRAINABLE_SPECIAL_TOKENS = [END_OF_TEXT,END_OF_GRAPH,END_OF_EMB,LABEL_TOKEN]
 
-special_token_dict = {'additional_special_tokens':TRAINABLE_SPECIAL_TOKENS+[EMBED_TOKEN,GRAPH_TOKEN]}
+# special_token_dict = {'additional_special_tokens':TRAINABLE_SPECIAL_TOKENS+[EMBED_TOKEN,GRAPH_TOKEN]}
 
 
 def paper_overlap_ratio(pids1, pids2):
@@ -150,7 +150,10 @@ class CrossNDDataset(Dataset):
             pos = [i for i in data if i['label'] ==1 ]
             neg = [i for i in data if i['label'] ==0 ]
             if self.model_args.upsample:
-                neg = neg * (len(pos)//len(neg)) # 平衡正负样本
+                if len(pos) > len(neg) and len(pos)/len(neg) > 1.5:
+                    neg = neg * (len(pos)//len(neg)) # 平衡正负样本
+                elif len(pos) < len(neg) and len(neg)/len(pos) > 1.5:
+                    pos = pos * (len(neg)//len(pos)) # 平衡正负样本
             all_data = pos + neg
             random.shuffle(all_data)
         elif self.mode == "eval":
@@ -170,12 +173,6 @@ class CrossNDDataset(Dataset):
                 all_data =json.load(open("/workspace/pangyunhe/project/crossnd/api/whoiswho/data/whoiswho/eval_na_checking_triplets_test.json"))
                 if 'author_sim' not in all_data[0]:
                     all_data = add_author_overlap(all_data)
-        # for i in all_data:
-        #     if 'author_sim' not in i:
-        #         breakpoint()
-        #     elif i['author_sim'] == None:
-        #         breakpoint()
-
         if model_args.num_turn > 1:
             data = []
             data_dd = defaultdict(list)
@@ -189,11 +186,24 @@ class CrossNDDataset(Dataset):
                     aid1 = item['aid1']
                     data_dd[f'{aid1}'].append(item)
             
+            # 调试打印
+            print(f"\n=== 调试信息 ===")
+            print(f"num_turn: {self.num_turn}")
+            print(f"all_data 原始大小: {len(all_data)}")
+            print(f"按学者分组后的组数: {len(data_dd)}")
+            for k, v in list(data_dd.items())[:5]:  # 打印前5个学者的数据
+                print(f"  学者 {k}: {len(v)} 条记录")
+            
             for v in data_dd.values():
                 v_ = copy.deepcopy(v)
                 random.shuffle(v_)
                 for i in range(0, len(v_), self.num_turn):
                     data.append(v_[i:i+self.num_turn])
+            
+            # 调试打印
+            print(f"最终 self.data 的大小: {len(data)}")
+            print(f"=== 调试信息结束 ===\n")
+            
             self.data = data
         else:
             random.shuffle(all_data)
@@ -265,19 +275,10 @@ class CrossNDDataset(Dataset):
                     outer_curr_len += len(self.tokenizer(outer_papers[num_outer_papers])['input_ids'])
                     num_outer_papers += 1
                 outer = "\n".join(cuted_outer_papers)
-                # print(f"Original outer papers: {len(outer_papers)}, Cut outer papers: {len(cuted_outer_papers)}")
 
         else:
             outer = None
             similarity = None
-            # if aid2 is not None and not self.model_args.hybrid_train:
-            #     papers_out = [i for i in self.out_name2pid[aid2] if i != data[0]['pid']]
-            #     outer_papers = [self.paper_data[fetch_paper_id(i)] for i in papers_out]
-            #     selected_outer_papers = self._select_related_papers(papers[0], outer_papers, type='random',num=self.model_args.paper_slct_num)
-            #     outer = "\n".join([self._fetch_single_paper_input(paper) for paper in selected_outer_papers])
-            # else:
-            #     outer = "无"
-            #     similarity = None
 
         # 构建模型输入
         chat = []
@@ -345,6 +346,7 @@ class CrossNDDataset(Dataset):
         truncated_text = self.tokenizer.convert_tokens_to_string(truncated_tokens)
         
         return truncated_text
+
     def resample_dataset(self,):
         self.data = []
         for k,v in self.tmp_data.items():
@@ -413,31 +415,3 @@ class CrossNDDataset(Dataset):
                 # 返回年份最接近的20篇论文
                 return sorted_papers[:num] if len(sorted_papers) > num else sorted_papers
     
-    def _build_multiturn_input(self, inner_papers, outer_papers, similarity, target_papers, name, slct_type="random",num=20):
-        """构建多轮输入"""
-        # 系统提示和全局提示模板
-        
-        inner = "\n".join([self._fetch_single_paper_input(paper) for paper in 
-                        (random.sample(inner_papers, num) if len(inner_papers) > num else inner_papers)])
-        outer = "\n".join([self._fetch_single_paper_input(paper) for paper in 
-                        (random.sample(outer_papers, num) if len(outer_papers) > num else outer_papers)])
-        
-        # 构建多轮输入，确保每个目标论文对应的标签位置使用特殊的<label_token>
-        multi_turn_input = ""
-        for index, p in enumerate(target_papers):
-            paper_input = self._fetch_single_paper_input(p)
-            turn_prompt = self.multi_turn_prompt.format(
-                index=index,
-                paper=paper_input,
-                label_token=LABEL_TOKEN  # 使用特殊的标签token
-            )
-            multi_turn_input += turn_prompt
-        
-        input_text = self.global_prompt.format(
-            name=name, 
-            inner=inner, 
-            outer=outer, 
-            targets=multi_turn_input
-        )
-        
-        return self.system_prompt, input_text

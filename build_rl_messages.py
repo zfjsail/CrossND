@@ -26,100 +26,7 @@ from trainer import ModelArguments, CrossNDTrainer_v2, compute_metrics
 from transformers import AutoTokenizer
 from utils_new import *
 from dataclasses import dataclass, field
-
-
-# #!/bin/bash
-
-# # 设置工作目录
-# cd /workspace/pangyunhe/project/crossnd/llm
-# pip install -r requirements.txt
-# wandb login 14a5316013f658f8ff2f0771a42ee134919be51b
-# wandb offline
-# wandb disabled
-# wandb login 14a5316013f658f8ff2f0771a42ee134919be51b
-
-# export WANDB_PROJECT=test
-# # 设置训练设备
-# # DEEPSPEED_GPUS="localhost:0,1,2,3,4,5,6,7"
-# DEEPSPEED_GPUS="localhost:1"
-# # 模型和数据参数
-# # MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-4B-Instruct-2507"
-# MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-8B"
-# DATA_SRC="/workspace/pangyunhe/project/crossnd/llm/data/alldata_nd_thr09_inout_sim.json"
-
-# DATA_DIR="/workspace/pangyunhe/project/crossnd/data/datasets--canalpang--crossnd/snapshots/fe8fc58f86dce28120151da0f110e286b947e7ba/kddcup"
-# OUTPUT_DIR="output/kddcup/test"
-# RUN_NAME="test"
-# LOSS_TYPE="psl"
-# NUM_TURN=10
-# LABEL_THR=0.9
-
-# # LoRA配置
-# LORA_R=32
-# LORA_ALPHA=64
-# LORA_DROPOUT=0.05
-
-# # 训练参数
-# NUM_EPOCHS=4
-# LEARNING_RATE=2e-5
-# WEIGHT_DECAY=0.01
-# WARMUP_RATIO=0.1
-# TRAIN_BATCH_SIZE=1
-# EVAL_BATCH_SIZE=1
-# GRADIENT_ACCUMULATION=8
-# EVAL_STEPS=0.1
-# SAVE_STEPS=0.1
-# # 运行训练命令
-# deepspeed --master_port 29505  --include $DEEPSPEED_GPUS \
-#     train.py \
-#     --upsample true \
-#     --max_seq_length 20000 \
-#     --label_thr $LABEL_THR \
-#     --hybrid_train false \
-#     --paper_slct_num 100 \
-#     --loss_type $LOSS_TYPE \
-#     --use_binary_head true \
-#     --use_outer true \
-#     --src $DATA_SRC \
-#     --model_path $MODEL_PATH \
-#     --data_dir $DATA_DIR \
-#     --lora_r $LORA_R \
-#     --lora_alpha $LORA_ALPHA \
-#     --lora_dropout $LORA_DROPOUT \
-#     --output_dir $OUTPUT_DIR \
-#     --do_eval \
-#     --num_turn $NUM_TURN \
-#     --eval_strategy steps \
-#     --eval_steps $EVAL_STEPS \
-#     --save_steps $SAVE_STEPS \
-#     --gradient_accumulation_steps $GRADIENT_ACCUMULATION \
-#     --eval_accumulation_steps 1 \
-#     --run_name $RUN_NAME \
-#     --deepspeed "config/ds_zero_1.json" \
-#     --num_train_epochs $NUM_EPOCHS \
-#     --per_device_train_batch_size $TRAIN_BATCH_SIZE \
-#     --per_device_eval_batch_size $EVAL_BATCH_SIZE \
-#     --logging_steps 1 \
-#     --learning_rate $LEARNING_RATE \
-#     --weight_decay $WEIGHT_DECAY \
-#     --warmup_ratio $WARMUP_RATIO \
-#     --lr_scheduler_type cosine \
-#     --warmup_ratio 0.1 \
-#     --save_strategy steps \
-#     --metric_for_best_model AUC_MAP \
-#     --greater_is_better true \
-#     --gradient_checkpointing \
-#     --include_inputs_for_metrics true \
-#     --remove_unused_columns false \
-#     --eval_use_gather_object true \
-#     --save_total_limit 2 \
-#     --save_only_model true \
-#     --dataloader_num_workers 20 \
-#     --bf16 
-
-
-
-
+import pandas as pd
 @dataclass
 class ModelArguments:
     """
@@ -171,10 +78,9 @@ class ModelArguments:
 
 
 
-def main():
+def main(num_turn=20,src=None):
     # 使用HfArgumentParser处理命令行参数
-    model_args = ModelArguments(num_turn=10,max_seq_length=22000)
-    
+    model_args = ModelArguments(num_turn=num_turn,max_seq_length=30000,src=f"/workspace/pangyunhe/project/crossnd/llm/data/hard_data/train_data_{src}.json")
     tokenizer = AutoTokenizer.from_pretrained(model_args.model_path, trust_remote_code=True)
 
 
@@ -252,56 +158,44 @@ def main():
     # train_data = [train_dataset[i] for i in range(len(train_dataset))]
     # breakpoint()
     # 1. 构建训练集
-    train_data = build_dataset_parallel(
-        train_dataset, 
-        num_workers=32,  # 你可以根据服务器性能调整这个数字
-        desc="Train Data",
-    )
-
-    # 2. 构建验证集
-    val_data = build_dataset_parallel(
-        eval_dataset, 
-        num_workers=32, 
-        desc="Valid Data"
-    )
-
-    # 3. 构建测试集
-    test_data = build_dataset_parallel(
-        test_dataset, 
-        num_workers=32, 
-        desc="Test Data"
-    )
-        #build_with multi processor
     
-    train_data = [item for index,item in enumerate(train_dataset)]
-    val_data = [item for index,item in enumerate(eval_dataset)]
-    test_data = [item for index,item in enumerate(test_dataset)]
+    train_path = os.path.join("/workspace/pangyunhe/project/crossnd/verl/data/crossnd/hard_data", f"train_data_{src}_{num_turn}.parquet")
+    test_path = os.path.join("/workspace/pangyunhe/project/crossnd/verl/data/crossnd/hard_data", f"test_data_{num_turn}.parquet")
+    val_path = os.path.join("/workspace/pangyunhe/project/crossnd/verl/data/crossnd/hard_data", f"val_data_{num_turn}.parquet")
+    if not os.path.exists(train_path):
+        train_data = build_dataset_parallel(
+            train_dataset, 
+            num_workers=32,  # 你可以根据服务器性能调整这个数字
+            desc="Train Data",
+        )
+        train_data = [item for index,item in enumerate(train_dataset)]
+        train_data = pd.DataFrame(train_data)
+        train_data.to_parquet(train_path)
 
-    import pandas as pd
-    train_data = pd.DataFrame(train_data)
-    test_data = pd.DataFrame(test_data)
-    valid_data= pd.DataFrame(val_data)
-    #to parquet data
-    train_data.to_parquet("/workspace/pangyunhe/project/crossnd/verl/data/crossnd/noise_train_turn20.parquet")
-    test_data.to_parquet("/workspace/pangyunhe/project/crossnd/verl/data/crossnd/test_turn20.parquet")
-    valid_data.to_parquet("/workspace/pangyunhe/project/crossnd/verl/data/crossnd/valid_turn20.parquet")
-    # save_to
+    if not os.path.exists(val_path):
+        val_data = build_dataset_parallel(
+            eval_dataset, 
+            num_workers=32, 
+            desc="Valid Data"
+        )
+        val_data = [item for index,item in enumerate(eval_dataset)]
+        val_data = pd.DataFrame(val_data)
+        val_data.to_parquet(val_path)
 
-    # # Save to parquet files
-    # train_df = pd.DataFrame(train_data)
-    # test_df = pd.DataFrame(test_data)
-
-    # train_df.to_parquet(os.path.join(local_dir, "train.parquet"))
-    # test_df.to_parquet(os.path.join(local_dir, "test.parquet"))
-
+    if not os.path.exists(test_path):
+        test_data = build_dataset_parallel(
+            test_dataset, 
+            num_workers=32, 
+            desc="Test Data"
+        )
+        test_data = [item for index,item in enumerate(test_dataset)]
+        test_data = pd.DataFrame(test_data)
+        test_data.to_parquet(test_path)
     
-    # with open("/workspace/pangyunhe/project/crossnd/verl/data/crossnd/train.json",'w') as f:
-    #     json.dump(train_data,f)
-    # with open("/workspace/pangyunhe/project/crossnd/verl/data/crossnd/val.json",'w') as f:
-    #     json.dump(val_data,f)
-    # with open("/workspace/pangyunhe/project/crossnd/verl/data/crossnd/test.json",'w') as f:
-    #     json.dump(test_data,f)
 
 if __name__ == "__main__":
-    main()
+    for src in [1000,2000,5000]:
+    # for src in [2000]:
+        for num_turn in [10,20]:
+            main(num_turn=num_turn,src=src)
     

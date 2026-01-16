@@ -10,17 +10,17 @@ wandb login 14a5316013f658f8ff2f0771a42ee134919be51b
 
 export WANDB_PROJECT=crossnd_kddcup
 # 设置训练设备
-DEEPSPEED_GPUS="localhost:0,1,2,3,4,5,6,7"
-# DEEPSPEED_GPUS="localhost:3"
+DEEPSPEED_GPUS="localhost:4,5,6,7"
+# DEEPSPEED_GPUS="localhost:7"
 # 模型和数据参数
 # MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-4B-Instruct-2507"
 MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-8B"
-DATA_SRC="/workspace/pangyunhe/project/crossnd/llm/data/alldata_nd_thr09_inout_sim.json"
+DATA_SRC="/workspace/pangyunhe/project/crossnd/llm/data/alldata_crossnd.json"
 
 DATA_DIR="/workspace/pangyunhe/project/crossnd/data/datasets--canalpang--crossnd/snapshots/fe8fc58f86dce28120151da0f110e286b947e7ba/kddcup"
-OUTPUT_DIR="output/kddcup/gen_psl"
-RUN_NAME="gen_psl"
-LOSS_TYPE="psl"
+OUTPUT_DIR="output/kddcup/gen_nonhybrid_thr07_cls"
+RUN_NAME="gen_nonhybrid_thr07_cls"
+LOSS_TYPE="ce"
 NUM_TURN=10
 LABEL_THR=0.9
 
@@ -30,25 +30,25 @@ LORA_ALPHA=64
 LORA_DROPOUT=0.05
 
 # 训练参数
-NUM_EPOCHS=4
+NUM_EPOCHS=10
 LEARNING_RATE=2e-5
 WEIGHT_DECAY=0.01
 WARMUP_RATIO=0.1
 TRAIN_BATCH_SIZE=1
 EVAL_BATCH_SIZE=1
-GRADIENT_ACCUMULATION=8
+GRADIENT_ACCUMULATION=16
 EVAL_STEPS=0.1
 SAVE_STEPS=0.1
 # 运行训练命令
 deepspeed --master_port 29505  --include $DEEPSPEED_GPUS \
     train.py \
-    --upsample true \
-    --max_seq_length 10000 \
+    --num_turn 10 \
+    --max_seq_length 22000 \
     --label_thr $LABEL_THR \
     --hybrid_train false \
-    --paper_slct_num 80 \
+    --paper_slct_num 100 \
     --loss_type $LOSS_TYPE \
-    --use_binary_head false \
+    --use_binary_head true \
     --use_outer true \
     --src $DATA_SRC \
     --model_path $MODEL_PATH \
@@ -86,3 +86,5 @@ deepspeed --master_port 29505  --include $DEEPSPEED_GPUS \
     --save_only_model true \
     --dataloader_num_workers 20 \
     --bf16 
+    # --dataloader_num_workers 20 \
+    

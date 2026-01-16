@@ -14,7 +14,7 @@ from transformers.utils import (
     logging,
 )
 from transformers.utils.deprecation import deprecate_kwarg
-from utils import LABEL_TOKEN,EMBED_TOKEN,GRAPH_TOKEN,TRAINABLE_SPECIAL_TOKENS
+from utils import LABEL_TOKEN,TRAINABLE_SPECIAL_TOKENS
 import torch.nn.functional as F
 from dataclasses import dataclass
 from transformers.utils import ModelOutput
@@ -346,6 +346,79 @@ class Qwen3ForCrossND(Qwen3PreTrainedModel, GenerationMixin):
         cs_ics_label = torch.tensor([i>0.5 for i in a1_a2_sim],dtype=torch.long).to(self.device)
         loss = cs_ics_label * eta_cs + (1-cs_ics_label) * eta_ics
         return 0.5 * loss.mean() + 0.5 * celoss
+
+
+    def psl_loss_v3(self, logits, labels, psi=0.0, **kwargs):
+        """
+        概率软逻辑(PSL)交叉纠错损失 - 改进版本
+        
+        根据论文公式 4.16-4.18 实现，用于检测内部和外部论文作者对的配对错误。
+        
+        Args:
+            logits: [batch*seq_len, num_classes] - 模型输出的logits
+            labels: [batch*seq_len] - 原始标签（是否为真正的匹配对）
+            psi: float - 灵活的间隔超参数ψ，默认为0.0
+            kwargs: 包含metadata的其他参数
+                metadata[0]: 列表，每个元素是字典，包含：
+                    - 'p_out_sim': P_old(p, a^out) 旧模型预测的匹配概率
+                    - 'author_sim': SIM(a^in, a^out) 两个作者的相似度
+        
+        Returns:
+            psl_loss: PSL损失值与CE损失的加权组合
+        """
+        celoss = self.cross_entropy_loss(logits, labels, **kwargs)
+        
+        # 检查必要的metadata
+        if 'metadata' not in kwargs or not kwargs['metadata']:
+            print("PSL metadata missing, using CE loss only.")
+            return celoss
+        
+        metadata = kwargs['metadata'][0]
+        if not metadata or not isinstance(metadata[0], dict):
+            print("Invalid metadata structure, using CE loss only.")
+            return celoss
+        
+        if 'p_out_sim' not in metadata[0] or 'author_sim' not in metadata[0]:
+            print("PSL metadata missing (p_out_sim or author_sim), using CE loss only.")
+            return celoss
+        
+        # 提取metadata
+        p_out_sim = torch.tensor([i['p_out_sim'] for i in metadata], dtype=logits.dtype, device=self.device)
+        author_sim = torch.tensor([i['author_sim'] for i in metadata], dtype=logits.dtype, device=self.device)
+        
+        # 提取P(p, a^in) - 当前模型预测的匹配概率
+        if self.is_binary_head:
+            # 二分类头情况
+            p_yes = torch.softmax(logits, dim=-1)[:, 1]
+        else:
+            # 多分类情况（从YES_TOKEN_IDS和NO_TOKEN_IDS提取）
+            yes_logits = logits[:, self.YES_TOKEN_IDS]
+            no_logits = logits[:, self.NO_TOKEN_IDS]
+            probs = torch.softmax(torch.stack([no_logits, yes_logits], dim=-1), dim=-1)
+            p_yes = probs[:, 1]
+        
+        # 根据原始标签确定目标标签y_i
+        # 标签处理：如果标签等于YES_TOKEN_IDS则为1（匹配），否则为0（不匹配）
+        y_i = (labels == self.YES_TOKEN_IDS).float()
+        
+        # 公式 4.16: η^cs = P_old(p, a^out) + SIM(a^in, a^out) - P(p, a^in) - ψ
+        eta_cs = p_out_sim + author_sim - p_yes - psi
+        
+        # 公式 4.17: η^ics = max(P_old(p, a^out), 1 - P_old(p, a^out)) - SIM(a^in, a^out) + P(p, a^in) - ψ
+        eta_ics = torch.max(p_out_sim, 1 - p_out_sim) - author_sim + p_yes - psi
+        
+        # 公式 4.18: min(0, η_i^cs) 和 min(0, η_i^ics)
+        eta_cs_clamped = torch.clamp(eta_cs, max=0.0)
+        eta_ics_clamped = torch.clamp(eta_ics, max=0.0)
+        
+        # 计算PSL损失：y_i * min(0, η_i^cs) + (1 - y_i) * min(0, η_i^ics)
+        psl_loss_per_sample = y_i * eta_cs_clamped + (1 - y_i) * eta_ics_clamped
+        psl_loss = psl_loss_per_sample.mean()
+        
+        # 返回PSL损失与CE损失的加权组合
+        # 权重可以根据需要调整
+        return 0.5 * psl_loss + 0.5 * celoss
+
     def regression_mse_loss(logits, labels, mask_value=-100.0):
         """
         回归头 MSE loss
@@ -426,6 +499,8 @@ class Qwen3ForCrossND(Qwen3PreTrainedModel, GenerationMixin):
             return self.psl_loss(logits, labels , **kwargs)
         elif self.loss_type == 'psl_v2':
             return self.psl_loss_v2(logits, labels , **kwargs)
+        elif self.loss_type == 'psl_v3':
+            return self.psl_loss_v3(logits, labels , **kwargs)
 
         else:
             raise ValueError(f"Invalid loss type: {self.loss_type}")
@@ -499,6 +574,533 @@ class Qwen3ForCrossND(Qwen3PreTrainedModel, GenerationMixin):
         logits = lm_logits[:, indices-1, :].detach()
         yes_logit, no_logit = logits[:, :, self.YES_TOKEN_IDS], logits[:, :, self.NO_TOKEN_IDS]
         score = F.softmax(torch.concat([yes_logit, no_logit], dim=0), dim=0)[0]
+        return INDModelWithPast(
+            loss=loss,
+            logits=score.unsqueeze(0),
+            past_key_values=outputs.past_key_values,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )
+    
+    def set_header(self,is_binary_head):
+        self.is_binary_head = is_binary_head
+
+    def set_loss_type(self,loss_type):
+        self.loss_type = loss_type
+
+    def freeze_lora(self):
+        for name, param in self.model.named_parameters():
+            if 'lora' in name:
+                param.requires_grad = False
+                
+    def unfreeze_lora(self): # unfreeze llm lora parameters
+        for name, param in self.model.named_parameters(): #匹配并unfreeze所有'lora'参数
+            if 'lora' in name:
+                param.requires_grad = True
+    
+    def monkey_patch_cls_head(self):
+        self.is_binary_head = True
+
+
+class LlamaForCrossND(LlamaPreTrainedModel, GenerationMixin):
+    """
+    Llama模型用于CrossND任务，支持与Qwen3ForCrossND相同的损失函数和推理功能
+    """
+    _tied_weights_keys = ["lm_head.weight"]
+    
+    def __init__(self, config):
+        super().__init__(config)
+        self.is_binary_head = False
+        self.loss_type = "ce"
+        self.model = LlamaModel(config)
+        self.vocab_size = config.vocab_size
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+
+        # Initialize weights and apply final processing
+        self.post_init()
+
+    def get_input_embeddings(self):
+        return self.model.embed_tokens
+
+    def set_input_embeddings(self, value):
+        self.model.embed_tokens = value
+
+    def get_output_embeddings(self):
+        return self.lm_head
+
+    def set_output_embeddings(self, new_embeddings):
+        self.lm_head = new_embeddings
+
+    def set_decoder(self, decoder):
+        self.model = decoder
+
+    def get_decoder(self):
+        return self.model
+    
+    def kl_divergence_loss(self, logits, labels, ignore_value=-100.0, **kwargs):
+        """
+        计算带有ignore_value功能的KL散度损失，适用于浮点数的soft_labels
+        
+        Args:
+            logits: [batch, seq_len, num_classes] 模型输出的原始logits
+            labels: [batch, seq_len, num_classes] 软标签概率分布（包含ignore_value）
+            ignore_value: 需要忽略的浮点数值（如-100.0）
+        
+        Returns:
+            KL散度损失值
+        """
+        # 保存原始形状
+        original_shape = logits.shape
+        batch_size, seq_len, num_classes = original_shape
+        
+        # 展平处理
+        logits_flat = logits.view(-1, num_classes)  # [batch * seq_len, num_classes]
+        soft_labels_flat = labels.view(-1, num_classes)  # [batch * seq_len, num_classes]
+        
+        # 创建mask：检查soft_labels中是否包含ignore_value
+        ignore_mask = torch.any(soft_labels_flat == ignore_value, dim=-1)  # [batch * seq_len]
+        
+        # 反转mask，得到有效位置的mask
+        valid_mask = ~ignore_mask  # [batch * seq_len]
+        
+        # 应用mask，只保留需要计算损失的位置
+        valid_logits = logits_flat[valid_mask]
+        valid_soft_labels = soft_labels_flat[valid_mask]
+        
+        if valid_logits.size(0) == 0:
+            # 如果没有有效样本，返回0损失
+            return torch.tensor(0.0, device=logits.device, requires_grad=True)
+        
+        # 计算对数概率
+        log_probs = F.log_softmax(valid_logits, dim=-1)
+        
+        # 计算KL散度损失
+        kl_loss = F.kl_div(log_probs, valid_soft_labels, reduction='batchmean', log_target=False)
+        
+        return kl_loss
+    
+    def soft_ce_loss(self, logits, labels, ignore_value=-100.0, **kwargs):
+        """
+        二分类头的软标签交叉熵损失
+        
+        Args:
+            logits: [batch_size, 2] - 二分类头输出，[no_logit, yes_logit]
+            labels: [batch_size] - 软标签，范围[0,1]，ignore_value表示忽略
+            ignore_value: float - 忽略的标签值，默认-100.0
+        """
+        # 创建有效样本的mask
+        valid_mask = (labels != ignore_value)
+        
+        # 只处理有效样本
+        valid_logits = logits[valid_mask]  # [valid_batch_size, 2]
+        valid_soft_labels = labels[valid_mask]  # [valid_batch_size]
+        
+        # 构建软目标分布 [no_prob, yes_prob]
+        soft_targets = torch.stack([
+            1 - valid_soft_labels,  # no的目标概率
+            valid_soft_labels       # yes的目标概率
+        ], dim=-1)  # [valid_batch_size, 2]
+        
+        # 计算log softmax
+        log_probs = F.log_softmax(valid_logits, dim=-1)
+        
+        # 计算交叉熵损失
+        loss = -torch.sum(soft_targets * log_probs, dim=-1).mean()
+        
+        return loss
+    
+    def cross_entropy_loss(self, logits, labels, ignore_value=-100,**kwargs):
+        loss_fct = nn.CrossEntropyLoss()
+        return loss_fct(logits, labels)
+    
+    def probabilistic_soft_logic_loss(self, logits, labels, phi, p_ain_sim, p_aout_sim, a1_a2_sim, vocab_size=None, **kwargs):  
+        """
+        计算概率软逻辑(PSL)交叉纠错损失
+        
+        参数:
+            phi: 灵活的间隔超参数 ψ
+            p_ain_sim: P(p, a^{in}) 的相似度，即当前模型预测的匹配概率 [batch_size]
+            p_aout_sim: P_old(p, a^{out}) 的相似度，即旧模型预测的匹配概率 [batch_size] 
+            a1_a2_sim: SIM(a^{in}, a^{out}) 的相似度 [batch_size]
+            kwargs: 其他参数如阈值等
+        
+        返回:
+            psl_loss: PSL损失值
+        """
+        psl_loss = torch.tensor(0.0, device=logits.device)
+        return psl_loss
+
+    def cross_entropy_loss_with_temperature(self, logits, labels, T=None,  vocab_size=None, **kwargs):
+        """带Temperature标准交叉熵损失"""
+        # logits: [batch, seq_len, num_classes]
+        # labels: [batch, seq_len]
+        if T is not None:
+            T = 2-T
+            logits = logits/T
+        # 使用CrossEntropyLoss
+        loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
+        return loss_fct(logits, labels.long())    
+    
+    def margin_ranking_loss(self, logits, labels, margin=0.5, ignore_index=-100, **kwargs):
+        """边际排序损失"""
+        if hasattr(self, 'is_binary_head') and self.is_binary_head:
+            # 获取异常概率（第0类，因为0=异常）
+            normal_probs = torch.softmax(logits, dim=-1)[:, 0]
+        else:      
+            normal_probs = logits[:, self.YES_TOKEN_IDS]
+            abnormal_probs = logits[:, self.NO_TOKEN_IDS]
+            normalized_probs = torch.softmax(torch.stack([normal_probs,abnormal_probs]),dim=0)[0]
+        
+        # 分离异常和正常样本
+        anomaly_mask = (labels == 0)  # 0=异常
+        normal_mask = (labels == 1)   # 1=正常
+
+        if not torch.any(anomaly_mask) or not torch.any(normal_mask):
+            return torch.tensor(0.0, device=logits.device)       
+         
+        anomaly_scores = normalized_probs[anomaly_mask]
+        normal_scores = normalized_probs[normal_mask]
+        
+        # 创建成对比较
+        anomaly_scores_exp = anomaly_scores.unsqueeze(1)
+        normal_scores_exp = normal_scores.unsqueeze(0)
+        
+        pairwise_diff = anomaly_scores_exp - normal_scores_exp + margin
+        rank_loss = torch.clamp(pairwise_diff, min=0).mean()
+        return rank_loss
+    
+    def focal_loss(self, logits, labels, alpha=0.25, gamma=2.0, ignore_index=-100, **kwargs):
+        """
+        Focal Loss实现，用于处理类别不平衡问题
+        
+        Args:
+            logits: [batch * seq_len, num_classes] 模型输出的原始logits
+            labels: [batch * seq_len] 目标标签
+            alpha: 类别平衡参数，可以是标量或tensor
+            gamma: focusing参数，控制难易样本的权重
+            ignore_index: 忽略的标签索引
+        
+        Returns:
+            focal loss值
+        """
+            
+        # 展平处理
+        logits_flat = logits.view(-1, logits.size(-1))  # [batch * seq_len, num_classes]
+        labels_flat = labels.view(-1).long()            # [batch * seq_len]
+        
+        # 创建有效样本mask
+        valid_mask = (labels_flat != ignore_index)
+        
+        if not torch.any(valid_mask):
+            return torch.tensor(0.0, device=logits.device, requires_grad=True)
+        
+        # 只处理有效样本
+        valid_logits = logits_flat[valid_mask]  # [valid_samples, num_classes]
+        valid_labels = labels_flat[valid_mask]  # [valid_samples]
+        
+        # 计算交叉熵损失
+        ce_loss = F.cross_entropy(valid_logits, valid_labels, reduction='none')
+        
+        # 计算预测概率
+        pt = torch.exp(-ce_loss)
+        
+        # 计算focal loss
+        focal_loss = alpha * (1 - pt) ** gamma * ce_loss
+        return focal_loss.mean()
+
+    def psl_loss(self, logits, labels, **kwargs):
+        celoss = self.cross_entropy_loss(logits, labels, **kwargs)
+        if 'p_in_sim' not in kwargs['metadata'][0][0] or 'p_out_sim' not in kwargs['metadata'][0][0] or 'author_sim' not in kwargs['metadata'][0][0]:
+            print("PSL metadata missing, using CE loss only.")
+            return celoss
+        
+        p_in_sim = [i['p_in_sim'] for i in kwargs['metadata'][0]]
+        p_out_sim = [i['p_out_sim'] for i in kwargs['metadata'][0]]
+        a1_a2_sim = [i['author_sim'] for i in kwargs['metadata'][0]]
+        p_out_sim = torch.tensor(p_out_sim,dtype = logits.dtype).to(self.device)
+        a1_a2_sim = torch.tensor(a1_a2_sim,dtype = logits.dtype).to(self.device)
+        if self.is_binary_head:
+            p_yes = torch.softmax(logits,dim=-1 )[0,labels[0]!=-100,1]
+            labels = labels[labels!=-100]
+
+        else:
+            yes_logits = logits[:,(labels!=-100)[-1], self.YES_TOKEN_IDS]
+            no_logits = logits[:,(labels!=-100)[-1], self.NO_TOKEN_IDS]
+
+            labels = labels[labels!=-100]
+            labels = (labels==self.YES_TOKEN_IDS).to(torch.long)
+            probs = torch.softmax(torch.stack([no_logits, yes_logits], dim=-1), dim=-1)
+            p_no, p_yes = probs[:,:,0 ], probs[:,:,1]
+
+        PSI = 1
+        eta1 = p_out_sim + a1_a2_sim - p_yes - PSI
+        eta2 = torch.max(p_out_sim, 1-p_out_sim) -a1_a2_sim + p_yes - PSI
+
+        eta_cs = torch.minimum(eta1, torch.zeros_like(eta1))
+        eta_ics = torch.minimum(eta2, torch.zeros_like(eta2))
+
+        loss = labels * eta_cs + (1-labels) * eta_ics
+        return 0.5 * loss.mean() + 0.5 * celoss
+    
+    def psl_loss_v2(self, logits, labels, **kwargs):
+        
+        celoss = self.cross_entropy_loss(logits, labels, **kwargs)
+        if 'p_in_sim' not in kwargs['metadata'][0][0] or 'p_out_sim' not in kwargs['metadata'][0][0] or 'author_sim' not in kwargs['metadata'][0][0]:
+            print("PSL metadata missing, using CE loss only.")
+            return celoss
+        
+        # p_in_sim = [i['p_in_sim'] for i in kwargs['metadata'][0]]
+        p_out_sim = [i['p_out_sim'] for i in kwargs['metadata'][0]]
+        a1_a2_sim = [i['author_sim'] for i in kwargs['metadata'][0]]
+        p_out_sim = torch.tensor(p_out_sim,dtype = logits.dtype).to(self.device)
+        a1_a2_sim = torch.tensor(a1_a2_sim,dtype = logits.dtype).to(self.device)
+        if self.is_binary_head:
+            p_yes = torch.softmax(logits,dim=-1 )[0,1]
+        else:
+            yes_logits = logits[:,:, self.YES_TOKEN_IDS]
+            no_logits = logits[:,:, self.NO_TOKEN_IDS]
+
+            labels = (labels==self.YES_TOKEN_IDS).to(torch.long)
+            probs = torch.softmax(torch.stack([no_logits, yes_logits], dim=-1), dim=-1)
+            p_no, p_yes = probs[:,:,0 ], probs[:,:,1]
+
+        PSI = 1
+        eta1 = p_out_sim + a1_a2_sim - p_yes - PSI
+        eta2 = torch.max(p_out_sim, 1-p_out_sim) -a1_a2_sim + p_yes - PSI
+
+        eta_cs = torch.minimum(eta1, torch.zeros_like(eta1))
+        eta_ics = torch.minimum(eta2, torch.zeros_like(eta2))
+        cs_ics_label = torch.tensor([i>0.5 for i in a1_a2_sim],dtype=torch.long).to(self.device)
+        loss = cs_ics_label * eta_cs + (1-cs_ics_label) * eta_ics
+        return 0.5 * loss.mean() + 0.5 * celoss
+
+    def psl_loss_v3(self, logits, labels, psi=0.0, **kwargs):
+        """
+        概率软逻辑(PSL)交叉纠错损失 - 改进版本
+        
+        根据论文公式 4.16-4.18 实现，用于检测内部和外部论文作者对的配对错误。
+        
+        Args:
+            logits: [batch*seq_len, num_classes] - 模型输出的logits
+            labels: [batch*seq_len] - 原始标签（是否为真正的匹配对）
+            psi: float - 灵活的间隔超参数ψ，默认为0.0
+            kwargs: 包含metadata的其他参数
+                metadata[0]: 列表，每个元素是字典，包含：
+                    - 'p_out_sim': P_old(p, a^out) 旧模型预测的匹配概率
+                    - 'author_sim': SIM(a^in, a^out) 两个作者的相似度
+        
+        Returns:
+            psl_loss: PSL损失值与CE损失的加权组合
+        """
+        celoss = self.cross_entropy_loss(logits, labels, **kwargs)
+        
+        # 检查必要的metadata
+        if 'metadata' not in kwargs or not kwargs['metadata']:
+            print("PSL metadata missing, using CE loss only.")
+            return celoss
+        
+        metadata = kwargs['metadata'][0]
+        if not metadata or not isinstance(metadata[0], dict):
+            print("Invalid metadata structure, using CE loss only.")
+            return celoss
+        
+        if 'p_out_sim' not in metadata[0] or 'author_sim' not in metadata[0]:
+            print("PSL metadata missing (p_out_sim or author_sim), using CE loss only.")
+            return celoss
+        
+        # 提取metadata
+        p_out_sim = torch.tensor([i['p_out_sim'] for i in metadata], dtype=logits.dtype, device=self.device)
+        author_sim = torch.tensor([i['author_sim'] for i in metadata], dtype=logits.dtype, device=self.device)
+        
+        # 提取P(p, a^in) - 当前模型预测的匹配概率
+        if self.is_binary_head:
+            # 二分类头情况
+            p_yes = torch.softmax(logits, dim=-1)[:, 1]
+        else:
+            # 多分类情况（从YES_TOKEN_IDS和NO_TOKEN_IDS提取）
+            yes_logits = logits[:, self.YES_TOKEN_IDS]
+            no_logits = logits[:, self.NO_TOKEN_IDS]
+            probs = torch.softmax(torch.stack([no_logits, yes_logits], dim=-1), dim=-1)
+            p_yes = probs[:, 1]
+        
+        # 根据原始标签确定目标标签y_i
+        # 标签处理：如果标签等于YES_TOKEN_IDS则为1（匹配），否则为0（不匹配）
+        y_i = (labels == self.YES_TOKEN_IDS).float()
+        
+        # 公式 4.16: η^cs = P_old(p, a^out) + SIM(a^in, a^out) - P(p, a^in) - ψ
+        eta_cs = p_out_sim + author_sim - p_yes - psi
+        
+        # 公式 4.17: η^ics = max(P_old(p, a^out), 1 - P_old(p, a^out)) - SIM(a^in, a^out) + P(p, a^in) - ψ
+        eta_ics = torch.max(p_out_sim, 1 - p_out_sim) - author_sim + p_yes - psi
+        
+        # 公式 4.18: min(0, η_i^cs) 和 min(0, η_i^ics)
+        eta_cs_clamped = torch.clamp(eta_cs, max=0.0)
+        eta_ics_clamped = torch.clamp(eta_ics, max=0.0)
+        
+        # 计算PSL损失：y_i * min(0, η_i^cs) + (1 - y_i) * min(0, η_i^ics)
+        psl_loss_per_sample = y_i * eta_cs_clamped + (1 - y_i) * eta_ics_clamped
+        psl_loss = psl_loss_per_sample.mean()
+        
+        # 返回PSL损失与CE损失的加权组合
+        # 权重可以根据需要调整
+        return 0.5 * psl_loss + 0.5 * celoss
+
+    def regression_mse_loss(logits, labels, mask_value=-100.0):
+        """
+        回归头 MSE loss
+        logits: [B, 1] 或 [B, seq_len, 1]，原始未限制 logit
+        labels: [B] 或 [B, seq_len]，范围 [0,1]
+        """
+        logits_flat = logits.view(-1)
+        labels_flat = labels.view(-1).float()
+
+        mask = (labels_flat != mask_value)
+        if not torch.any(mask):
+            return torch.tensor(0.0, device=logits.device)
+
+        return F.mse_loss(logits_flat[mask], labels_flat[mask])
+    
+    def binary_cross_entropy_loss(self, logits, labels, ignore_index=-100, **kwargs):
+        """
+        二分类交叉熵损失
+        提取YES_TOKEN_IDS和NO_TOKEN_IDS对应的logit，然后计算BCE loss
+        
+        logits: [batch, seq_len, vocab_size] - 模型输出logits
+        labels: [batch, seq_len] - 标签
+        """
+        # 展平处理
+        batch_size, seq_len, vocab_size = logits.shape
+        logits_flat = logits.view(-1, vocab_size)  # [batch * seq_len, vocab_size]
+        labels_flat = labels.view(-1)               # [batch * seq_len]
+        
+        # 创建有效样本的mask
+        valid_mask = (labels_flat != ignore_index)
+        
+        # 只处理有效样本
+        valid_logits = logits_flat[valid_mask]  # [valid_count, vocab_size]
+        valid_labels = labels_flat[valid_mask]  # [valid_count]
+        
+        # 提取YES和NO对应的logit值
+        yes_logits = valid_logits[:, self.YES_TOKEN_IDS]
+        no_logits = valid_logits[:, self.NO_TOKEN_IDS]
+        
+        # 将两个logit堆叠，构成二分类logits [valid_count, 2]
+        binary_logits = torch.stack([no_logits, yes_logits], dim=-1)
+        
+        # 将标签转换为二分类标签（YES_TOKEN_IDS对应1，其他对应0）
+        binary_labels = (valid_labels == self.YES_TOKEN_IDS).long()
+        
+        # 计算交叉熵损失
+        loss_fct = nn.CrossEntropyLoss()
+        loss = loss_fct(binary_logits, binary_labels)
+        
+        return loss
+
+    def compute_loss(self, logits, labels, similarity = None, **kwargs):
+        """根据loss_type计算相应的损失"""
+        if self.loss_type == 'ls':
+            return self.soft_ce_loss(logits, labels, **kwargs)
+        elif self.loss_type == 'kl':
+            return self.kl_divergence_loss(logits, labels, **kwargs)
+        elif self.loss_type == 'ce':
+            return self.cross_entropy_loss(logits, labels, **kwargs)
+        elif self.loss_type == 'ce_temperature':
+            return self.cross_entropy_loss_with_temperature(logits, labels,T=similarity ,vocab_size=self.config.vocab_size, **kwargs)
+        elif self.loss_type == 'ce_fl':  # focal loss and ce
+            return self.focal_loss(logits, labels, **kwargs)
+        elif self.loss_type == 'ls_ranking':
+            ls_loss = self.soft_ce_loss(logits, labels, **kwargs)
+            ranking_loss = self.margin_ranking_loss(logits, labels, **kwargs)
+            return ls_loss + ranking_loss
+        elif self.loss_type == 'kl_ranking':
+            kl_loss = self.kl_divergence_loss(logits, labels, **kwargs)
+            ranking_loss = self.margin_ranking_loss(logits, labels, **kwargs)
+            return kl_loss + ranking_loss
+        elif self.loss_type == 'ce_ranking':
+            ce_loss = self.cross_entropy_loss(logits, labels, vocab_size=self.config.vocab_size, **kwargs)
+            ranking_loss = self.margin_ranking_loss(logits, labels, **kwargs)
+            return ce_loss + ranking_loss
+        elif self.loss_type == 'ranking':
+            return self.margin_ranking_loss(logits, labels, **kwargs)
+        elif self.loss_type == 'psl':
+            return self.psl_loss(logits, labels , **kwargs)
+        elif self.loss_type == 'psl_v2':
+            return self.psl_loss_v2(logits, labels , **kwargs)
+        elif self.loss_type == 'psl_v3':
+            return self.psl_loss_v3(logits, labels , **kwargs)
+
+        else:
+            raise ValueError(f"Invalid loss type: {self.loss_type}")
+    
+    @can_return_tuple
+    @deprecate_kwarg("num_logits_to_keep", version="4.51", new_name="logits_to_keep")
+    def forward(
+        self,
+        input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_values: Optional[Cache] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        cache_position: Optional[torch.LongTensor] = None,
+        logits_to_keep: Union[int, torch.Tensor] = 0,
+        **kwargs: Unpack[KwargsForCausalLM],
+    ) -> CausalLMOutputWithPast:
+        metadata = kwargs.get('metadata',[])
+        similarity = metadata[0][0].get('author_sim',0)
+        
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        )
+        breakpoint()
+        outputs: BaseModelOutputWithPast = self.model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            cache_position=cache_position,
+        )
+
+        hidden_states = outputs.last_hidden_state
+        loss = None
+        score = None
+        lm_logits = self.lm_head(hidden_states)
+        
+
+        if labels is not None:
+            # 获取非-100标签的位置，squeeze处理可能导致维度问题
+            label_mask = (labels.squeeze(0) != -100)
+            indices = label_mask.nonzero(as_tuple=False).squeeze(-1)  # 返回列索引
+            
+            if hasattr(self, 'is_binary_head') and self.is_binary_head:
+
+                labels[labels==self.YES_TOKEN_IDS] = 1
+                labels[labels==self.NO_TOKEN_IDS] = 0
+                target_logits = lm_logits[:,:,[self.NO_TOKEN_IDS,self.YES_TOKEN_IDS]] 
+            else:
+                target_logits = lm_logits
+            target_labels = labels[:,indices].contiguous()
+            target_logits = target_logits[:,indices-1,:].contiguous()
+            logits_flat = target_logits.reshape(-1, target_logits.size(-1))
+            labels_flat = target_labels.reshape(-1)
+
+            loss = self.compute_loss(logits=logits_flat, labels=labels_flat, similarity=similarity, **kwargs)
+
+            # 从target_logits而不是lm_logits提取,避免索引不匹配的问题
+            logits = target_logits.detach()
+            yes_logit, no_logit = logits[:, :, self.YES_TOKEN_IDS], logits[:, :, self.NO_TOKEN_IDS]
+            score = F.softmax(torch.concat([yes_logit, no_logit], dim=0), dim=0)[0]
+        else:
+            # 没有labels时，返回全0 score
+            score = torch.zeros(lm_logits.size(0), dtype=lm_logits.dtype, device=lm_logits.device)
         return INDModelWithPast(
             loss=loss,
             logits=score.unsqueeze(0),

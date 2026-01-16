@@ -8,21 +8,21 @@ wandb online
 wandb enabled
 wandb login 14a5316013f658f8ff2f0771a42ee134919be51b
 
-export WANDB_PROJECT=crossnd_kddcup
+export WANDB_PROJECT=crossnd2
 # 设置训练设备
-DEEPSPEED_GPUS="localhost:0,1,2,3,4,5,6,7"
-# DEEPSPEED_GPUS="localhost:3"
+# DEEPSPEED_GPUS="localhost:0,1,2,3,4,5,6,7"
+DEEPSPEED_GPUS="localhost:3"
 # 模型和数据参数
 # MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-4B-Instruct-2507"
-MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-8B"
-DATA_SRC="/workspace/pangyunhe/project/crossnd/llm/data/alldata_nd_thr09_inout_sim.json"
+MODEL_PATH="/workspace/pangyunhe/models/Llama-3.1-8B-Instruct"
+DATA_SRC="/workspace/pangyunhe/project/crossnd/llm/data/all_data_ensemble_mean.json"
 
 DATA_DIR="/workspace/pangyunhe/project/crossnd/data/datasets--canalpang--crossnd/snapshots/fe8fc58f86dce28120151da0f110e286b947e7ba/kddcup"
-OUTPUT_DIR="output/kddcup/gen_lowrank"
-RUN_NAME="gen_lowrank"
-LOSS_TYPE="gen"
+OUTPUT_DIR="output/model/ce_llama"
+RUN_NAME="ce_llama"
+LOSS_TYPE="ce"
 NUM_TURN=10
-LABEL_THR=0.9
+LABEL_THR=0.7
 
 # LoRA配置
 LORA_R=8
@@ -42,8 +42,6 @@ SAVE_STEPS=0.1
 # 运行训练命令
 deepspeed --master_port 29505  --include $DEEPSPEED_GPUS \
     train.py \
-    --upsample true \
-    --max_seq_length 20000 \
     --label_thr $LABEL_THR \
     --hybrid_train false \
     --paper_slct_num 100 \
@@ -65,7 +63,7 @@ deepspeed --master_port 29505  --include $DEEPSPEED_GPUS \
     --gradient_accumulation_steps $GRADIENT_ACCUMULATION \
     --eval_accumulation_steps 1 \
     --run_name $RUN_NAME \
-    --deepspeed "config/ds_zero_1.json" \
+    --deepspeed "config/ds_zero_2.json" \
     --num_train_epochs $NUM_EPOCHS \
     --per_device_train_batch_size $TRAIN_BATCH_SIZE \
     --per_device_eval_batch_size $EVAL_BATCH_SIZE \

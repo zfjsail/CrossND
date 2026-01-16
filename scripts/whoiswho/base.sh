@@ -13,7 +13,6 @@ DEEPSPEED_GPUS="localhost:0,1,2,3,4,5,6,7"
 # DEEPSPEED_GPUS="localhost:7"
 # 模型和数据参数
 MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-8B"
-MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-8B"
 DATA_SRC="/workspace/pangyunhe/project/crossnd/llm/data/whoiswho/self_clean_float_halfsubset.json"
 
 DATA_DIR="/workspace/pangyunhe/project/crossnd/data/datasets--canalpang--crossnd/snapshots/fe8fc58f86dce28120151da0f110e286b947e7ba/kddcup"
