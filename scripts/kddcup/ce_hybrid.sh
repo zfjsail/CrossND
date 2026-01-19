@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # 设置工作目录
+cd /workspace/pangyunhe/project/crossnd/llm
 pip install -r requirements.txt
 wandb login 14a5316013f658f8ff2f0771a42ee134919be51b
 wandb online
@@ -9,19 +10,19 @@ wandb login 14a5316013f658f8ff2f0771a42ee134919be51b
 
 export WANDB_PROJECT=crossnd2
 # 设置训练设备
-# DEEPSPEED_GPUS="localhost:0,1,2,3,4,5,6,7"
-DEEPSPEED_GPUS="localhost:3"
+DEEPSPEED_GPUS="localhost:0,1,2,3,4,5,6,7"
+# DEEPSPEED_GPUS="localhost:3"
 # 模型和数据参数
 # MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-4B-Instruct-2507"
-MODEL_PATH="/workspace/pangyunhe/models/Llama-3.1-8B-Instruct"
+MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-8B"
 DATA_SRC="/workspace/pangyunhe/project/crossnd/llm/data/all_data_ensemble_mean.json"
 
 DATA_DIR="/workspace/pangyunhe/project/crossnd/data/datasets--canalpang--crossnd/snapshots/fe8fc58f86dce28120151da0f110e286b947e7ba/kddcup"
-OUTPUT_DIR="output/model/ce_llama"
-RUN_NAME="ce_llama"
+OUTPUT_DIR="output/model/ce_8B"
+RUN_NAME="ce_qwen_thr09"
 LOSS_TYPE="ce"
 NUM_TURN=10
-LABEL_THR=0.7
+LABEL_THR=0.9
 
 # LoRA配置
 LORA_R=8
@@ -30,7 +31,7 @@ LORA_DROPOUT=0.05
 
 # 训练参数
 NUM_EPOCHS=4
-LEARNING_RATE=2e-5
+LEARNING_RATE=5e-5
 WEIGHT_DECAY=0.01
 WARMUP_RATIO=0.1
 TRAIN_BATCH_SIZE=1
@@ -42,7 +43,7 @@ SAVE_STEPS=0.1
 deepspeed --master_port 29505  --include $DEEPSPEED_GPUS \
     train.py \
     --label_thr $LABEL_THR \
-    --hybrid_train false \
+    --hybrid_train true \
     --paper_slct_num 100 \
     --loss_type $LOSS_TYPE \
     --use_binary_head true \

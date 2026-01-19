@@ -166,7 +166,9 @@ def main():
     model.set_header(model_args.use_binary_head)
     model.set_loss_type(model_args.loss_type)
     model.loss_type = model_args.loss_type
-
+    model.PSI = model_args.psl_psi
+    model.psl_lambda = model_args.psl_lambda
+    
     train_dataset = CrossNDDataset(
         data_dir=data_args.data_dir,
         tokenizer=tokenizer,

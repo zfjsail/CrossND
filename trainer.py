@@ -517,6 +517,9 @@ class ModelArguments:
     author_sim: float = field(
         default=0.5
     )
+    author_sim_lower_bound: float = field(
+        default=None
+    )
     lora_path: str = field(
         default=None,
         metadata={"help": "预训练的LoRA路径"}
@@ -524,12 +527,6 @@ class ModelArguments:
     max_seq_length: int = field(
         default=None,
         metadata={"help": "最大序列长度"}
-    )
-    freeze_header: bool = field(
-        default=True
-    )
-    use_hybrid_head: bool = field(  
-        default=False
     )
     num_turn_schedule_type: str = field(
         default=None,
@@ -539,10 +536,6 @@ class ModelArguments:
         default=150,
         metadata={"help": "每个 epoch 最多执行的步数（如果为 None 则不限制）"}
     )
-    use_similarity: bool = field(
-        default=True,
-        metadata={"help": "是否使用相似性"}
-    )
     use_clean_data: bool = field(
         default=True,
         metadata={"help": "是否使用clean data"}
@@ -551,7 +544,14 @@ class ModelArguments:
         default=None,
         metadata={"help": "base model save path"}
     )
-
+    psl_psi : float = field(
+        default=1.0,
+        metadata={"help": "psl psi"}
+    )
+    psl_lambda : float = field(
+        default=0.5,
+        metadata={"help": "psl lambda"}
+    )
 
 # class SaveBestCheckpointCallback(TrainerCallback):
 #     def __init__(self, output_dir, best_ckpt_dir='best_ckpt'):

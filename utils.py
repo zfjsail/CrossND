@@ -67,6 +67,12 @@ def add_author_overlap_kddcup(data,in_name2pid,out_name2pid):
     all_data = []
     similarity_pairs = {}
     for item in data:
+        if 'aid2' not in item:
+            all_data.append(item)
+            continue
+        if 'similarity' in item or 'author_sim' in item:
+            all_data.append(item)
+            continue
         pid = item['pid']
         aid1 = item['aid1']
         aid2 = item['aid2']
@@ -76,7 +82,6 @@ def add_author_overlap_kddcup(data,in_name2pid,out_name2pid):
             similarity_pairs[f'{aid1}-{aid2}'] = (cur_sim, cur_sim_max)
         else:
             cur_sim, cur_sim_max = similarity_pairs[f'{aid1}-{aid2}']
-            similarity_pairs[f'{aid1}-{aid2}'] = (cur_sim, cur_sim_max)
         item['author_sim'] = cur_sim
         item['author_sim_max'] = cur_sim_max
         all_data.append(item)
@@ -171,6 +176,7 @@ class CrossNDDataset(Dataset):
             data = json.load(open(model_args.src))
             if self.data_args.dataset == "whoiswho" and 'author_sim' not in data:
                 data = add_author_overlap(data)
+            data = add_author_overlap_kddcup(data,self.in_name2pid,self.out_name2pid)
             if self.model_args.label_thr is not None and self.mode == 'train':
                 for i in data:
                     i['ori_label'] = i['label']
@@ -187,8 +193,8 @@ class CrossNDDataset(Dataset):
             if self.data_args.dataset == "kddcup":
                 data_file = os.path.join(data_dir, "eval_na_checking_triplets_valid.json")
                 all_data = json.load(open(data_file))
-                if "similarity" not in all_data[0] or "author_sim" not in all_data[0]:
-                    all_data = add_author_overlap_kddcup(all_data,self.in_name2pid,self.out_name2pid)
+                # if "similarity" not in all_data[0] or "author_sim" not in all_data[0]:
+                all_data = add_author_overlap_kddcup(all_data,self.in_name2pid,self.out_name2pid)
                 # data_file = os.path.join(data_dir, "test_with_sim.json")
                 
             elif self.data_args.dataset == "whoiswho":
@@ -199,12 +205,13 @@ class CrossNDDataset(Dataset):
             if self.data_args.dataset == "kddcup":
                 data_file = os.path.join(data_dir, "eval_na_checking_triplets_test.json")
                 all_data = json.load(open(data_file))
-                if "similarity" not in all_data[0] or "author_sim" not in all_data[0]:
-                    all_data = add_author_overlap_kddcup(all_data,self.in_name2pid,self.out_name2pid)
+                # if "similarity" not in all_data[0] or "author_sim" not in all_data[0]:
+                all_data = add_author_overlap_kddcup(all_data,self.in_name2pid,self.out_name2pid)
             elif self.data_args.dataset == "whoiswho":
                 all_data =json.load(open("/workspace/pangyunhe/project/crossnd/api/whoiswho/data/whoiswho/eval_na_checking_triplets_test.json"))
                 if 'author_sim' not in all_data[0]:
                     all_data = add_author_overlap(all_data)
+
         # 保存原始 all_data 用于后续重新构建
         self.all_data_raw = copy.deepcopy(all_data)
 
@@ -214,15 +221,11 @@ class CrossNDDataset(Dataset):
         else:
             data = []
             data_dd = defaultdict(list)
-            if self.use_outer:
-                for item in all_data:
-                    aid1 = item['aid1']
-                    aid2 = item['aid2']
-                    data_dd[f'{aid1}-{aid2}'].append(item)
-            else:
-                for item in all_data:
-                    aid1 = item['aid1']
-                    data_dd[f'{aid1}'].append(item)
+            for item in all_data:
+                aid1 = item['aid1']
+                aid2 = item.get('aid2','None')
+                data_dd[f'{aid1}-{aid2}'].append(item)
+
             
             for v in data_dd.values():
                 v_ = copy.deepcopy(v)
@@ -284,7 +287,7 @@ class CrossNDDataset(Dataset):
         elif 'author_sim' in data[0]:
             similarity = data[0]['author_sim']
         else:
-            raise ValueError('no similarity found')
+            similarity = None
         
         label_list = [i['label'] for i in data]
         labels = torch.tensor(label_list, dtype=torch.long)
@@ -298,15 +301,19 @@ class CrossNDDataset(Dataset):
         inner_papers = [self.paper_data[fetch_paper_id(i)] for i in papers_in]
         random.shuffle(inner_papers)
 
-        selected_inner_papers = self._select_related_papers(papers[0], inner_papers, type='random',num=self.model_args.paper_slct_num)
+        # selected_inner_papers = self._select_related_papers(papers[0], inner_papers, type='random',num=self.model_args.paper_slct_num)
+        selected_inner_papers = inner_papers[:self.model_args.paper_slct_num]
         inner = "\n".join([self._fetch_single_paper_input(paper) for paper in selected_inner_papers])
         if self.use_outer and aid2 is not None:
-            if (self.model_args.hybrid_train and similarity >= self.model_args.author_sim) \
-            or (not self.model_args.hybrid_train):
+            # 两种情况加入outer：1) similarity >= author_sim  2) author_sim_lower_bound非None且similarity < lower_bound
+            should_include_outer = (similarity >= self.model_args.author_sim) or \
+                                   (self.model_args.author_sim_lower_bound is not None and similarity < self.model_args.author_sim_lower_bound)
+            if not self.model_args.hybrid_train or (self.model_args.hybrid_train and should_include_outer):
                 papers_out = [i for i in self.out_name2pid[aid2] if i != data[0]['pid']]
                 outer_papers = [self.paper_data[fetch_paper_id(i)] for i in papers_out]
                 random.shuffle(outer_papers)
-                selected_outer_papers = self._select_related_papers(papers[0], outer_papers, type='random',num=self.model_args.paper_slct_num)
+                # selected_outer_papers = self._select_related_papers(papers[0], outer_papers, type='random',num=self.model_args.paper_slct_num)
+                selected_outer_papers = outer_papers[:self.model_args.paper_slct_num]
                 outer_papers = [self._fetch_single_paper_input(paper) for paper in selected_outer_papers]
                 pred_paper_inputs_len = len(self.tokenizer(' ; '.join([self._fetch_single_paper_input(paper) for paper in papers]))['input_ids'])
 
@@ -360,8 +367,6 @@ class CrossNDDataset(Dataset):
             inputs = self.tokenizer.apply_chat_template(chat,return_tensors="pt")
             # 确保attention_mask与input_ids形状一致
             attention_mask = torch.ones_like(inputs, dtype=torch.long)
-
-
             # ### 将label_token的位置的attention_mask设置为0
             # label_token_id = self.tokenizer.convert_tokens_to_ids(LABEL_TOKEN)
             # attention_mask[inputs['input_ids'] == label_token_id] = 0
