@@ -653,7 +653,6 @@ class LlamaForCrossND(LlamaPreTrainedModel, GenerationMixin):
     def psl_loss_v2(self, logits, labels, **kwargs):
         
         celoss = self.cross_entropy_loss(logits, labels, **kwargs)
-        breakpoint()
         if 'p_in_sim' not in kwargs['metadata'][0][0] or 'p_out_sim' not in kwargs['metadata'][0][0] or 'author_sim' not in kwargs['metadata'][0][0]:
             print("PSL metadata missing, using CE loss only.")
             return celoss

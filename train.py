@@ -214,7 +214,7 @@ def main():
     training_args.remove_unused_columns = False
     
     # 初始化回调列表
-    callbacks = [ EarlyStoppingCallback(early_stopping_patience=3)]
+    callbacks = []  # EarlyStoppingCallback(early_stopping_patience=3)]
     if model_args.num_turn_schedule_type is not None:
         # 添加NumTurnScheduler回调以支持逐epoch增加num_turn
         num_turn_callback = NumTurnScheduler(
