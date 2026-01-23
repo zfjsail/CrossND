@@ -206,6 +206,6 @@ def main():
     trainer._load_from_checkpoint(model_args.lora_path)
     
     trainer.predict(test_dataset=test_dataset)
-    
+
 if __name__ == "__main__":
     main()

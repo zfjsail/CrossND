@@ -192,7 +192,6 @@ class Qwen3ForCrossND(Qwen3PreTrainedModel, GenerationMixin):
         return 0.5 * loss.mean() + 0.5 * celoss
     
     def psl_loss_v2(self, logits, labels, **kwargs):
-        
         celoss = self.cross_entropy_loss(logits, labels, **kwargs)
         if 'p_in_sim' not in kwargs['metadata'][0][0] or 'p_out_sim' not in kwargs['metadata'][0][0] or 'author_sim' not in kwargs['metadata'][0][0]:
             print("PSL metadata missing, using CE loss only.")
@@ -203,15 +202,16 @@ class Qwen3ForCrossND(Qwen3PreTrainedModel, GenerationMixin):
         a1_a2_sim = [i['author_sim'] for i in kwargs['metadata'][0]]
         p_out_sim = torch.tensor(p_out_sim,dtype = logits.dtype).to(self.device)
         a1_a2_sim = torch.tensor(a1_a2_sim,dtype = logits.dtype).to(self.device)
-        if self.is_binary_head:
-            p_yes = torch.softmax(logits,dim=-1 )[0,1]
-        else:
-            yes_logits = logits[:,:, self.YES_TOKEN_IDS]
-            no_logits = logits[:,:, self.NO_TOKEN_IDS]
+        # if self.is_binary_head:
+        #     p_yes = torch.softmax(logits,dim=-1 )[0,1]
+        # else:
+        #     yes_logits = logits[:,:, self.YES_TOKEN_IDS]
+        #     no_logits = logits[:,:, self.NO_TOKEN_IDS]
 
-            labels = (labels==self.YES_TOKEN_IDS).to(torch.long)
-            probs = torch.softmax(torch.stack([no_logits, yes_logits], dim=-1), dim=-1)
-            p_no, p_yes = probs[:,:,0 ], probs[:,:,1]
+        #     labels = (labels==self.YES_TOKEN_IDS).to(torch.long)
+        #     probs = torch.softmax(torch.stack([no_logits, yes_logits], dim=-1), dim=-1)
+        #     p_no, p_yes = probs[:,:,0 ], probs[:,:,1]
+        p_yes = torch.softmax(logits,dim=-1 )[:,1]
         if self.PSI is not None:
             PSI = self.PSI
         else:   
@@ -865,7 +865,6 @@ class LlamaForCrossND(LlamaPreTrainedModel, GenerationMixin):
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
-        breakpoint()
         outputs: BaseModelOutputWithPast = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
