@@ -10,7 +10,7 @@ export WANDB_PROJECT=crossnd_whoiswho
 
 # 设置训练设备
 # DEEPSPEED_GPUS="localhost:0,1,2,3,4,5,6,7"
-DEEPSPEED_GPUS="localhost:6,7"
+DEEPSPEED_GPUS="localhost:4,5,6,7"
 # 模型和数据参数
 MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-8B"
 DATA_SRC="/workspace/pangyunhe/project/crossnd/llm/data/whoiswho/self_clean_float_halfsubset_pinout_sim.json"
@@ -78,5 +78,6 @@ deepspeed --master_port 29500  --include $DEEPSPEED_GPUS \
     --remove_unused_columns false \
     --load_best_model_at_end true \
     --eval_use_gather_object true \
-    --save_total_limit 1 \
+    --seed 84 \
+    --save_total_limit 2 \
     --bf16 

@@ -83,5 +83,5 @@ deepspeed --master_port $RANDOM_PORT --include $DEEPSPEED_GPUS \
     --remove_unused_columns false \
     --load_best_model_at_end true \
     --eval_use_gather_object true \
-    --save_total_limit 1 \
+    --save_total_limit 2 \
     --bf16 
