@@ -22,6 +22,9 @@ modelscope download --dataset canalpang/crossnd-whoiswho --local_dir ./whoiswho_
 ### 训练评估模型
 
 ```bash 
+
+# 运行前改动每个sh文件下的 MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-8B"
+
 bash /workspace/pangyunhe/project/crossnd/crossnd/scripts/whoiswho/psl.sh
 
 bash /workspace/pangyunhe/project/crossnd/crossnd/scripts/whoiswho/psl_lambda0.2_psi1.0.sh
