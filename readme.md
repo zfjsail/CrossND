@@ -24,4 +24,11 @@ modelscope download --dataset canalpang/crossnd-whoiswho --local_dir ./whoiswho_
 ```bash 
 bash /workspace/pangyunhe/project/crossnd/crossnd/scripts/whoiswho/psl.sh
 
+bash /workspace/pangyunhe/project/crossnd/crossnd/scripts/whoiswho/psl_lambda0.2_psi1.0.sh
+
+bash /workspace/pangyunhe/project/crossnd/crossnd/scripts/whoiswho/psl_lambda0.5_psi1.0.sh
+
+bash /workspace/pangyunhe/project/crossnd/crossnd/scripts/whoiswho/psl_lambda0.5_psi1.4.sh
+
+bash /workspace/pangyunhe/project/crossnd/crossnd/scripts/whoiswho/psl_lambda0.8_psi1.0.sh
 ```
