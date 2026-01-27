@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 设置工作目录
-cd /workspace/pangyunhe/project/crossnd/llm
+
 pip install -r requirements.txt
 wandb login 14a5316013f658f8ff2f0771a42ee134919be51b
 wandb online
@@ -9,13 +9,15 @@ wandb enabled
 export WANDB_PROJECT=crossnd_whoiswho
 
 # 设置训练设备
-# DEEPSPEED_GPUS="localhost:0,1,2,3,4,5,6,7"
-DEEPSPEED_GPUS="localhost:4,5,6,7"
+DEEPSPEED_GPUS="localhost:0,1,2,3,4,5,6,7"
+# DEEPSPEED_GPUS="localhost:4,5,6,7"
 # 模型和数据参数
 MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-8B"
-DATA_SRC="/workspace/pangyunhe/project/crossnd/llm/data/whoiswho/self_clean_float_halfsubset_pinout_sim.json"
+DATA_SRC="whoiswho_data/self_clean_float_halfsubset_pinout_sim.json"
 
-DATA_DIR="/workspace/pangyunhe/project/crossnd/data/datasets--canalpang--crossnd/snapshots/fe8fc58f86dce28120151da0f110e286b947e7ba/kddcup"
+DATA_DIR="whoiswho_data"
+
+
 OUTPUT_DIR="output/whoiswho/psl"
 RUN_NAME="whoiswho_psl"
 LOSS_TYPE="psl_v2"
@@ -26,7 +28,7 @@ LORA_ALPHA=32
 LORA_DROPOUT=0.05
 
 # 训练参数
-NUM_EPOCHS=2
+NUM_EPOCHS=3
 LEARNING_RATE=2e-5
 WEIGHT_DECAY=0.01
 WARMUP_RATIO=0.1
@@ -38,7 +40,7 @@ SAVE_STEPS=0.05
 # 运行训练命令
 deepspeed --master_port 29500  --include $DEEPSPEED_GPUS \
     inference.py \
-    --lora_path "/workspace/pangyunhe/project/crossnd/llm/output/whoiswho/psl/checkpoint-1184" \
+    --lora_path "output/whoiswho/psl/best_checkpoint" \
     --dataset whoiswho \
     --label_thr 0.9 \
     --hybrid_train false \

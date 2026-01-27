@@ -15,7 +15,7 @@ __pycache__/
 .coverage.*
 data/
 .gitignore
-
+whoiswho_data/*
 
 **/*.pt
 **/checkpoints

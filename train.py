@@ -21,7 +21,7 @@ Fine-tuning the library models for sequence to sequence.
 # Adapted from
 
 import logging
-import os
+import shutil
 import sys
 import transformers
 import torch
@@ -38,7 +38,7 @@ from trainer import DataArguments, ModelArguments, CrossNDTrainer_v2, compute_me
 from peft import get_peft_model, LoraConfig, TaskType, PeftModel
 from utils import *
 from model import Qwen3ForCrossND,LlamaForCrossND
-
+import os
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -150,11 +150,7 @@ def main():
         model=model,
         tokenizer_only=model_args.use_label_token
     )
-    if model_args.base_model_save_path is not None:
-        os.makedirs(model_args.base_model_save_path, exist_ok=True)
-        model.save_pretrained(model_args.base_model_save_path)
-        tokenizer.save_pretrained(model_args.base_model_save_path)
-        exit(0)
+
     # model.add_special_tokens(tokenizer)
     model.YES_TOKEN_IDS, model.NO_TOKEN_IDS = tokenizer.convert_tokens_to_ids(['Yes','No'])
     model.tokenizer = tokenizer
@@ -283,6 +279,24 @@ def main():
     
     best_checkpoint = trainer.state.best_model_checkpoint
     logger.info(f"Best checkpoint: {best_checkpoint}")
+    
+    # 将最佳检查点复制到同文件夹中并命名为 best_checkpoint
+    if best_checkpoint:
+        
+        checkpoint_dir = os.path.dirname(best_checkpoint)
+        best_checkpoint_link = os.path.join(checkpoint_dir, "best_checkpoint")
+        
+        # 如果已存在，先删除
+        if os.path.exists(best_checkpoint_link):
+            if os.path.isdir(best_checkpoint_link):
+                shutil.rmtree(best_checkpoint_link)
+            else:
+                os.remove(best_checkpoint_link)
+        
+        # 复制最佳检查点
+        shutil.copytree(best_checkpoint, best_checkpoint_link)
+        logger.info(f"Best checkpoint copied to: {best_checkpoint_link}")
+    
     trainer._load_from_checkpoint(best_checkpoint)
     
     trainer.predict(test_dataset=test_dataset)

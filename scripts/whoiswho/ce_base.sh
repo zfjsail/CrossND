@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 设置工作目录
-cd /workspace/pangyunhe/project/crossnd/llm
+
 pip install -r requirements.txt
 wandb login 14a5316013f658f8ff2f0771a42ee134919be51b
 wandb online
@@ -30,7 +30,7 @@ LORA_ALPHA=32
 LORA_DROPOUT=0.05
  
 # 训练参数
-NUM_EPOCHS=2
+NUM_EPOCHS=3
 LEARNING_RATE=2e-5
 WEIGHT_DECAY=0.01
 WARMUP_RATIO=0.1
