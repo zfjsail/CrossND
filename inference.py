@@ -205,7 +205,17 @@ def main():
 
     trainer._load_from_checkpoint(model_args.lora_path)
     
-    trainer.predict(test_dataset=test_dataset)
+    # 执行预测并捕获结果
+    predictions = trainer.predict(test_dataset=test_dataset)
+    
+    # 将结果写入到 res.txt 文件
+    with open("./res.txt", "w", encoding="utf-8") as f:
+        f.write(f"run_name: {training_args.run_name}\n")
+        f.write("="*50 + "\n")
+        f.write("Final Results:\n")
+        f.write(str(predictions) + "\n")
+    
+    logger.info("Results saved to ./res.txt")
 
 if __name__ == "__main__":
     main()

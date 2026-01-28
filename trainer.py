@@ -240,6 +240,17 @@ class CrossNDTrainer_v2(Trainer):
         # To be JSON-serializable, we need to remove numpy types or zero-d tensors
         metrics = denumpify_detensorize(metrics)
         
+        # 将评估结果以JSON格式追加保存到res.txt文件
+        res_txt_path = f'{self.args.output_dir}/res.txt'
+        result_dict = {
+            'save_path': self.args.output_dir,
+            'metric_key_prefix': metric_key_prefix,
+            'num_samples': num_samples,
+            'metrics': metrics
+        }
+        with open(res_txt_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(result_dict, ensure_ascii=False, indent=2) + '\n')
+        
         if all_losses:
             metrics[f"{metric_key_prefix}_loss"] = np.mean(all_losses).item()
         

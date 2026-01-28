@@ -1,4 +1,3 @@
 transformers==4.51.1
 peft
-wandb
 deepspeed

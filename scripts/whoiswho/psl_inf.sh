@@ -1,16 +1,8 @@
 #!/bin/bash
 
-# 设置工作目录
-
-pip install -r requirements.txt
-wandb login 14a5316013f658f8ff2f0771a42ee134919be51b
-wandb online
-wandb enabled
-export WANDB_PROJECT=crossnd_whoiswho
-
 # 设置训练设备
 DEEPSPEED_GPUS="localhost:0,1,2,3,4,5,6,7"
-# DEEPSPEED_GPUS="localhost:4,5,6,7"
+# DEEPSPEED_GPUS="localhost:4"
 # 模型和数据参数
 MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-8B"
 DATA_SRC="whoiswho_data/self_clean_float_halfsubset_pinout_sim.json"
@@ -40,7 +32,7 @@ SAVE_STEPS=0.05
 # 运行训练命令
 deepspeed --master_port 29500  --include $DEEPSPEED_GPUS \
     inference.py \
-    --lora_path "output/whoiswho/psl/best_checkpoint" \
+    --lora_path "output/whoiswho/psl_lambda0.8_psi1.0/checkpoint-888" \
     --dataset whoiswho \
     --label_thr 0.9 \
     --hybrid_train false \
@@ -82,4 +74,5 @@ deepspeed --master_port 29500  --include $DEEPSPEED_GPUS \
     --eval_use_gather_object true \
     --seed 84 \
     --save_total_limit 2 \
+    --report_to none \
     --bf16 

@@ -3,10 +3,6 @@
 # 设置工作目录
 
 pip install -r requirements.txt
-wandb login 14a5316013f658f8ff2f0771a42ee134919be51b
-wandb online
-wandb enabled
-export WANDB_PROJECT=test
 
 # 设置训练设备
 DEEPSPEED_GPUS="localhost:0,1,2,3,4,5,6,7"
@@ -83,6 +79,7 @@ deepspeed --master_port 29500  --include $DEEPSPEED_GPUS \
     --save_total_limit 2 \
     --psl_lambda $PSL_LAMBDA \
     --psl_psi $PSL_PSI \
+    --report_to none \
     --bf16 
 
 echo "训练完成，开始使用多个seed进行推理..."
@@ -140,6 +137,7 @@ do
         --save_total_limit 2 \
         --psl_lambda $PSL_LAMBDA \
         --psl_psi $PSL_PSI \
+        --report_to none \
         --bf16
 done
 

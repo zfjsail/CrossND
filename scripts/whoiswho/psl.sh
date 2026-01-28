@@ -1,12 +1,5 @@
 #!/bin/bash
 
-# 设置工作目录
-
-pip install -r requirements.txt
-wandb login 14a5316013f658f8ff2f0771a42ee134919be51b
-wandb online
-wandb enabled
-export WANDB_PROJECT=crossnd_whoiswho
 
 # 设置训练设备
 DEEPSPEED_GPUS="localhost:0,1,2,3,4,5,6,7"
@@ -134,6 +127,7 @@ do
         --eval_use_gather_object true \
         --seed $SEED \
         --save_total_limit 2 \
+        --report_to log \
         --bf16
 done
 
