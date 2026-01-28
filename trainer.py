@@ -214,9 +214,9 @@ class CrossNDTrainer_v2(Trainer):
         if num_samples == 0 and observed_num_examples > 0:
             num_samples = observed_num_examples
         
-        os.makedirs(f'{self.args.output_dir}/res', exist_ok=True)
-        with open(f'{self.args.output_dir}/res/{metric_key_prefix}.pkl','wb') as f:
-            pickle.dump({'all_preds': all_preds, 'all_labels': all_labels, 'all_losses': all_losses, 'all_metadata': all_metadata}, f)
+        # os.makedirs(f'{self.args.output_dir}/res', exist_ok=True)
+        # with open(f'{self.args.output_dir}/res/{metric_key_prefix}.pkl','wb') as f:
+        #     pickle.dump({'all_preds': all_preds, 'all_labels': all_labels, 'all_losses': all_losses, 'all_metadata': all_metadata}, f)
         # exit(0)
         # Metrics!
         if (
