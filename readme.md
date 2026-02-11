@@ -25,7 +25,7 @@ modelscope download --dataset canalpang/crossnd-whoiswho --local_dir ./whoiswho_
 
 ```bash 
 
-# 运行前改动每个sh文件下的 MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-8B"
+# 运行前改动每个sh文件下的 MODEL_PATH="/workspace/pangyunhe/models/Qwen/your_model_path"
 
 bash /workspace/pangyunhe/project/crossnd/crossnd/scripts/whoiswho/psl.sh
 

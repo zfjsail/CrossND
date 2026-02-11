@@ -147,23 +147,6 @@ def main():
     model.set_loss_type(model_args.loss_type)
     model.loss_type = model_args.loss_type
 
-    train_dataset = CrossNDDataset(
-        data_dir=data_args.data_dir,
-        tokenizer=tokenizer,
-        model_args = model_args,
-        data_args = data_args,
-        num_turn=model_args.num_turn,
-        mode="train",
-    )
-    
-    eval_dataset = CrossNDDataset(
-        data_dir=data_args.data_dir,
-        tokenizer=tokenizer,
-        model_args = model_args,
-        data_args = data_args,
-        num_turn=model_args.num_turn,
-        mode="eval",  # 使用评估模式
-    )
     test_dataset = CrossNDDataset(
         data_dir=data_args.data_dir,
         tokenizer=tokenizer,
@@ -188,14 +171,17 @@ def main():
     model.enable_input_require_grads()
 
     os.makedirs(training_args.output_dir, exist_ok=True)
+    logger.info(f"[DEBUG] output_dir = {training_args.output_dir}")
+    logger.info(f"[DEBUG] multiturn_path = {model_args.multiturn_path}")
+    logger.info(f"[DEBUG] tts_strategy = {model_args.tts_strategy}")
     data_collator = CrossNDCollator(tokenizer=tokenizer)
     training_args.remove_unused_columns = False
     # 创建训练器
     trainer = CrossNDTrainer_v2(
         model=model,
         args=training_args,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
+        train_dataset=test_dataset,
+        eval_dataset=test_dataset,
         data_collator=data_collator,
         tokenizer=tokenizer,
         compute_metrics=compute_metrics,

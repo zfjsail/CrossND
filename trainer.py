@@ -240,16 +240,92 @@ class CrossNDTrainer_v2(Trainer):
         # To be JSON-serializable, we need to remove numpy types or zero-d tensors
         metrics = denumpify_detensorize(metrics)
         
-        # 将评估结果以JSON格式追加保存到res.txt文件
-        res_txt_path = f'{self.args.output_dir}/res.txt'
-        result_dict = {
-            'save_path': self.args.output_dir,
-            'metric_key_prefix': metric_key_prefix,
-            'num_samples': num_samples,
-            'metrics': metrics
-        }
-        with open(res_txt_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(result_dict, ensure_ascii=False, indent=2) + '\n')
+        # 只在主进程保存评估结果
+        if self.args.local_rank <= 0 or not hasattr(self, "accelerator") or self.accelerator.is_main_process:
+            logger.info(f"[DEBUG] Saving results to output_dir: {self.args.output_dir}")
+            # 将评估结果以JSON格式追加保存到res.txt文件
+            res_txt_path = f'{self.args.output_dir}/res.txt'
+            result_dict = {
+                'save_path': self.args.output_dir,
+                'metric_key_prefix': metric_key_prefix,
+                'num_samples': num_samples,
+                'metrics': metrics
+            }
+            if metric_key_prefix != 'eval':
+                with open(res_txt_path, 'a', encoding='utf-8') as f:
+                    f.write(json.dumps(result_dict, ensure_ascii=False, indent=2) + '\n')
+            
+            # 保存详细预测结果（包含metadata）
+            try:
+                # 使用与compute_metrics相同的flatten_metadata函数
+                def flatten_metadata(meta):
+                    """递归展平metadata"""
+                    result = []
+                    if not isinstance(meta, list):
+                        # 如果是 dict，直接保存
+                        result.append(meta)
+                    elif isinstance(meta, list):
+                        # 如果是 list，递归处理每个元素
+                        for item in meta:
+                            result.extend(flatten_metadata(item))
+                    # 其他类型忽略
+                    return result
+                
+                # 调试日志
+                logger.info(f"开始处理预测结果保存 - {metric_key_prefix}")
+                logger.info(f"all_preds 类型: {type(all_preds)}, 长度: {len(all_preds) if isinstance(all_preds, (list, tuple)) else 'N/A'}")
+                logger.info(f"all_metadata 类型: {type(all_metadata)}, 长度: {len(all_metadata) if isinstance(all_metadata, (list, tuple)) else 'N/A'}")
+                
+                # 展平predictions - 使用与compute_metrics相同的方式
+                # all_preds 结构: [[tensor([...])], [tensor([...])], ...]
+                # 需要先展平列表结构，再 cat tensor
+                flat_preds = torch.cat(flatten_metadata(all_preds)).tolist()
+                logger.info(f"展平后的 predictions 数量: {len(flat_preds)}")
+                
+                # 展平metadata
+                # all_metadata 结构: [[[[{...}, {...}]]], [[[{...}, ...]]], ...]
+                # 需要递归展平到字典列表
+                flat_metadata = flatten_metadata(all_metadata)
+                logger.info(f"展平后的 metadata 数量: {len(flat_metadata)}")
+                
+                # 构建结果列表
+                predictions_with_metadata = []
+                min_len = min(len(flat_preds), len(flat_metadata))
+                
+                if min_len == 0:
+                    logger.warning(f"预测或metadata为空，无法保存结果")
+                else:
+                    for i in range(min_len):
+                        pred = flat_preds[i]
+                        meta = flat_metadata[i]
+                        if isinstance(meta, dict):
+                            result_item = dict(meta)  # 复制metadata
+                            result_item['pred'] = float(pred)  # 添加预测值
+                            predictions_with_metadata.append(result_item)
+                    
+                    if len(predictions_with_metadata) > 0:
+                        # 保存到JSON文件，如果文件存在则自动添加版本号
+                        base_path = f'{self.args.output_dir}/predictions_with_labels_{metric_key_prefix}'
+                        predictions_json_path = f'{base_path}.json'
+                        
+                        # 检查文件是否存在，如果存在则添加版本号
+                        if os.path.exists(predictions_json_path):
+                            version = 1
+                            while os.path.exists(f'{base_path}_v{version}.json'):
+                                version += 1
+                            predictions_json_path = f'{base_path}_v{version}.json'
+                        
+                        with open(predictions_json_path, 'w', encoding='utf-8') as f:
+                            json.dump(predictions_with_metadata, f, ensure_ascii=False, indent=2)
+                        
+                        logger.info(f"预测结果已保存到: {predictions_json_path}")
+                        logger.info(f"共保存 {len(predictions_with_metadata)} 条预测结果")
+                    else:
+                        logger.warning(f"没有有效的metadata字典，无法保存结果")
+            except Exception as e:
+                import traceback
+                logger.warning(f"保存预测结果时出错: {str(e)}")
+                logger.warning(f"错误堆栈: {traceback.format_exc()}")
         
         if all_losses:
             metrics[f"{metric_key_prefix}_loss"] = np.mean(all_losses).item()
@@ -562,6 +638,14 @@ class ModelArguments:
     psl_lambda : float = field(
         default=0.5,
         metadata={"help": "psl lambda"}
+    )
+    multiturn_path : str = field(
+        default=None,
+        metadata={"help": "多轮推理的预测分数文件路径，用于TTS优化"}
+    )
+    tts_strategy : str = field(
+        default="desc",
+        metadata={"help": "TTS排序策略: desc(降序), asc(升序), confidence(置信度), confidence_desc(置信度降序), random(随机)"}
     )
 
 # class SaveBestCheckpointCallback(TrainerCallback):

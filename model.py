@@ -160,7 +160,7 @@ class Qwen3ForCrossND(Qwen3PreTrainedModel, GenerationMixin):
     def psl_loss(self, logits, labels, **kwargs):
         celoss = self.cross_entropy_loss(logits, labels, **kwargs)
         if 'p_in_sim' not in kwargs['metadata'][0][0] or 'p_out_sim' not in kwargs['metadata'][0][0] or 'author_sim' not in kwargs['metadata'][0][0]:
-            print("PSL metadata missing, using CE loss only.")
+            # print("PSL metadata missing, using CE loss only.")
             return celoss
         
         p_in_sim = [i['p_in_sim'] for i in kwargs['metadata'][0]]
@@ -194,7 +194,7 @@ class Qwen3ForCrossND(Qwen3PreTrainedModel, GenerationMixin):
     def psl_loss_v2(self, logits, labels, **kwargs):
         celoss = self.cross_entropy_loss(logits, labels, **kwargs)
         if 'p_in_sim' not in kwargs['metadata'][0][0] or 'p_out_sim' not in kwargs['metadata'][0][0] or 'author_sim' not in kwargs['metadata'][0][0]:
-            print("PSL metadata missing, using CE loss only.")
+            # print("PSL metadata missing, using CE loss only.")
             return celoss
         
         # p_in_sim = [i['p_in_sim'] for i in kwargs['metadata'][0]]

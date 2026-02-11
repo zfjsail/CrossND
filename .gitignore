@@ -17,6 +17,8 @@ data/
 .gitignore
 whoiswho_data/*
 
+/clean_checkpoints
+
 **/*.pt
 **/checkpoints
 **/wget-log

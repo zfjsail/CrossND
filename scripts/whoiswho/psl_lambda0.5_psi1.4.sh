@@ -8,7 +8,7 @@ pip install -r requirements.txt
 DEEPSPEED_GPUS="localhost:0,1,2,3,4,5,6,7"
 # DEEPSPEED_GPUS="localhost:0"
 # 模型和数据参数
-MODEL_PATH="/workspace/pangyunhe/models/Qwen/Qwen3-8B"
+MODEL_PATH="/workspace/pangyunhe/models/Qwen/your_model_path"
 DATA_SRC="whoiswho_data/self_clean_float_halfsubset_pinout_sim.json"
 
 DATA_DIR="whoiswho_data"
