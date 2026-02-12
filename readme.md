@@ -16,7 +16,6 @@ pip install -r requirements.txt
 
 ### 2. 下载数据
 ```bash
-modelscope login  --token ms-5ef9d8f4-c656-48a4-9af9-b6e660d4ee42
 modelscope download --dataset canalpang/crossnd-whoiswho --local_dir ./whoiswho_data
 ```
 ## 使用方式
