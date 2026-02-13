@@ -25,6 +25,12 @@ crossnd/
 
 ## Dataset
 
+### WhoIsWho Dataset
+
+The WhoIsWho dataset is available on Hugging Face at [canalpang/kddcup_for_crossnd](https://huggingface.co/datasets/canalpang/kddcup_for_crossnd).
+
+### Local Dataset Files
+
 The `kddcup_data/` directory contains all necessary data files for training and evaluation:
 
 - `alldata_nd_thr09_inout_sim.json` - Main training data
@@ -102,7 +108,48 @@ OUTPUT_DIR="output/my_experiment"
 
 ## Inference
 
-After training, use the inference utilities to make predictions:
+After training, you can run inference using the provided script:
+
+```bash
+cd crossnd
+bash inf.sh
+```
+
+### Inference Configuration
+
+The inference script (`inf.sh`) includes the following key parameters:
+
+- **GPU Configuration**: 8 GPUs by default (modify `DEEPSPEED_GPUS` for different setups)
+- **Model Path**: Uses `Qwen/Qwen3-8B` from Hugging Face by default
+- **LoRA Checkpoint**: Loads from `output/Qwen8B/cls_outer_v4_psl/checkpoint-200`
+- **Inference Parameters**:
+  - Paper Selection Number: 100
+  - Number of Turns: 10
+  - Batch Size: 1 per device
+  - Loss Type: PSL v2
+- **Output**: Results saved to `output/inference/`
+
+### Customization
+
+You can modify inference parameters by editing variables in `inf.sh`:
+
+```bash
+# Example: Change LoRA checkpoint path
+LORA_PATH="output/Qwen8B/cls_outer_v4_psl/checkpoint-best"
+
+# Example: Change number of GPUs
+DEEPSPEED_GPUS="localhost:0,1,2,3"
+
+# Example: Change output directory
+OUTPUT_DIR="output/my_inference"
+
+# Example: Change paper selection number
+PAPER_SLCT_NUM=50
+```
+
+### Programmatic Inference
+
+You can also use the inference utilities directly in Python:
 
 ```python
 from inference import load_model, predict
