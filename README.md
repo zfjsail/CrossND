@@ -1,13 +1,10 @@
-# CrossND - Cross-Source Reasoning-based Correction for Author Name Disambiguation
+# CrossND - Cross-Domain Name Disambiguation Project
 
-This repository contains the implementation of the paper **"Cross-Source Reasoning-based Correction for Author Name Disambiguation"**.
+## Overview
 
-The project implements a cross-source author name disambiguation system using Large Language Models (LLMs) with LoRA fine-tuning and reasoning-based correction mechanisms.
+CrossND is a cross-domain name disambiguation project based on Large Language Models (LLM), supporting datasets such as KDDCup and WhoisWho.
 
-## Branches
-
-- **main**: Contains the KDD Cup dataset implementation
-- **whoiswho**: Contains the WhoIsWho dataset implementation (see [whoiswho branch](https://github.com/zfjsail/CrossND/tree/whoiswho))
+This project implements the method from the paper **"Cross-Source Reasoning-based Correction for Author Name Disambiguation"**, using LoRA fine-tuning and reasoning-based correction mechanisms for author name disambiguation.
 
 ## Project Structure
 
@@ -15,35 +12,21 @@ The project implements a cross-source author name disambiguation system using La
 crossnd/
 ├── config/              # DeepSpeed and training configurations
 ├── kddcup_data/        # Dataset files
-├── scripts/            # Training scripts
-├── train.py            # Main training script
+├── train.sh            # Training script
+├── inf.sh              # Inference script
+├── train.py            # Main training program
 ├── model.py            # Model definitions
-├── trainer.py          # Custom trainer implementation
+├── trainer.py          # Custom trainer
 ├── utils.py            # Utility functions
 └── inference.py        # Inference utilities
 ```
 
-## Dataset
+## Installation
 
-### WhoIsWho Dataset
-
-The WhoIsWho dataset is available on Hugging Face at [canalpang/kddcup_for_crossnd](https://huggingface.co/datasets/canalpang/kddcup_for_crossnd).
-
-### Local Dataset Files
-
-The `kddcup_data/` directory contains all necessary data files for training and evaluation:
-
-- `alldata_nd_thr09_inout_sim.json` - Main training data
-- `train_triplets.json`, `test_with_sim.json`, `valid_with_sim.json` - Train/test/validation splits
-- `aid_to_pids_in.json`, `aid_to_pids_out.json` - Author-paper mappings
-- `paper_dict_mag.json`, `pub_dict.json` - Paper metadata
-- Other supporting data files
-
-## Requirements
-
-Install dependencies:
+### 1. Install Dependencies
 
 ```bash
+cd crossnd
 pip install -r requirements.txt
 ```
 
@@ -53,47 +36,52 @@ Main dependencies:
 - DeepSpeed
 - LoRA/PEFT
 
-## Model Setup
+### 2. Download Data
 
-The training script uses the Qwen3-8B model. You have two options:
-
-1. **Use Hugging Face Model Hub** (Recommended for first-time users):
-   - The script is configured to use `"Qwen/Qwen3-8B"` by default
-   - The model will be automatically downloaded on first run
-
-2. **Use Local Model**:
-   - Download the Qwen3-8B model to a local directory
-   - Update the `MODEL_PATH` variable in `scripts/train.sh`
-
-## Training
-
-To start training:
+The KDDCup dataset is available on Hugging Face: [canalpang/kddcup_for_crossnd](https://huggingface.co/datasets/canalpang/kddcup_for_crossnd)
 
 ```bash
-cd crossnd
-bash scripts/train.sh
+# Download data using modelscope (optional)
+modelscope download --dataset canalpang/crossnd-kddcup --local_dir ./kddcup_data
 ```
 
-### Training Configuration
+The `kddcup_data/` directory contains all necessary data files for training and evaluation:
 
-The training script (`scripts/train.sh`) includes the following key parameters:
+- `alldata_nd_thr09_inout_sim.json` - Main training data
+- `train_triplets.json`, `test_with_sim.json`, `valid_with_sim.json` - Train/test/validation splits
+- `aid_to_pids_in.json`, `aid_to_pids_out.json` - Author-paper mappings
+- `paper_dict_mag.json`, `pub_dict.json` - Paper metadata
+- Other supporting data files
 
-- **GPU Configuration**: 8 GPUs by default (modify `DEEPSPEED_GPUS` for different setups)
+## Usage
+
+### Training Model
+
+```bash
+# Before running, modify the model path in train.sh
+# MODEL_PATH="your/Qwen3-8B"
+
+bash train.sh
+```
+
+**Training Configuration:**
+
+- **GPU Configuration**: 8 GPUs by default (modify `DEEPSPEED_GPUS` to adjust)
 - **LoRA Parameters**: 
   - Rank: 16
   - Alpha: 32
   - Dropout: 0.05
 - **Training Parameters**:
-  - Epochs: 10
+  - Epochs: 4
   - Learning Rate: 2e-5
   - Batch Size: 1 per device
   - Gradient Accumulation: 8 steps
 - **Loss Type**: PSL v2 (Probabilistic Soft Logic)
-- **Output**: Results saved to `output/Qwen8B/cls_outer_v4_psl/`
+- **Output Directory**: `output/psl/`
 
-### Customization
+**Customizing Training Parameters:**
 
-You can modify training parameters by editing variables in `scripts/train.sh`:
+You can modify training parameters by editing variables in `train.sh`:
 
 ```bash
 # Example: Change number of GPUs
@@ -104,38 +92,44 @@ LEARNING_RATE=1e-5
 
 # Example: Change output directory
 OUTPUT_DIR="output/my_experiment"
+
+# Example: Change model path
+MODEL_PATH="Qwen/Qwen3-8B"  # Use Hugging Face model
+# or
+MODEL_PATH="/path/to/local/Qwen3-8B"  # Use local model
 ```
 
-## Inference
+### Inference and Evaluation
 
-After training, you can run inference using the provided script:
+After training, you can run inference using the inference script:
 
 ```bash
-cd crossnd
+# Before running, modify the model path and LoRA checkpoint path in inf.sh
+# MODEL_PATH="your/Qwen3-8B"
+# LORA_PATH="output/Qwen8B/cls_outer_v4_psl/checkpoint-200"
+
 bash inf.sh
 ```
 
-### Inference Configuration
+**Inference Configuration:**
 
-The inference script (`inf.sh`) includes the following key parameters:
-
-- **GPU Configuration**: 8 GPUs by default (modify `DEEPSPEED_GPUS` for different setups)
-- **Model Path**: Uses `Qwen/Qwen3-8B` from Hugging Face by default
+- **GPU Configuration**: 8 GPUs by default (modify `DEEPSPEED_GPUS` to adjust)
+- **Model Path**: Uses `Qwen/Qwen3-8B` by default
 - **LoRA Checkpoint**: Loads from `output/Qwen8B/cls_outer_v4_psl/checkpoint-200`
 - **Inference Parameters**:
   - Paper Selection Number: 100
   - Number of Turns: 10
   - Batch Size: 1 per device
   - Loss Type: PSL v2
-- **Output**: Results saved to `output/inference/`
+- **Output Directory**: `output/inference/`
 
-### Customization
+**Customizing Inference Parameters:**
 
 You can modify inference parameters by editing variables in `inf.sh`:
 
 ```bash
 # Example: Change LoRA checkpoint path
-LORA_PATH="output/Qwen8B/cls_outer_v4_psl/checkpoint-best"
+LORA_PATH="output/psl/checkpoint-best"
 
 # Example: Change number of GPUs
 DEEPSPEED_GPUS="localhost:0,1,2,3"
@@ -147,23 +141,9 @@ OUTPUT_DIR="output/my_inference"
 PAPER_SLCT_NUM=50
 ```
 
-### Programmatic Inference
+## Key Features
 
-You can also use the inference utilities directly in Python:
-
-```python
-from inference import load_model, predict
-
-# Load trained model
-model = load_model("output/Qwen8B/cls_outer_v4_psl/checkpoint-best")
-
-# Make predictions
-results = predict(model, test_data)
-```
-
-## Features
-
-- **LoRA Fine-tuning**: Efficient parameter-efficient fine-tuning
+- **LoRA Fine-tuning**: Efficient parameter-efficient fine-tuning method
 - **DeepSpeed Integration**: Distributed training with ZeRO optimization
 - **Binary Classification Head**: Custom classification layer for disambiguation
 - **Outer Product Features**: Enhanced feature representation
@@ -174,8 +154,9 @@ results = predict(model, test_data)
 
 - The script uses DeepSpeed ZeRO Stage 1 for memory optimization
 - Gradient checkpointing is enabled to reduce memory usage
-- Mixed precision training (BF16) is used for faster training
+- Mixed precision training (BF16) is used to accelerate training
 - Best model is automatically saved based on AUC_MAP metric
+- Make sure to modify `MODEL_PATH` in the scripts to the correct model path before running
 
 ## Citation
 
@@ -184,9 +165,6 @@ If you use this code in your research, please cite our paper:
 ```bibtex
 @inproceedings{crossnd2024,
   title={Cross-Source Reasoning-based Correction for Author Name Disambiguation},
-  author={Your Name},
-  booktitle={Proceedings of KDD Cup},
-  year={2024}
 }
 ```
 
