@@ -58,6 +58,10 @@ pip install openai tqdm
 
 CrossND supports KDD Cup and WhoIsWho-style author disambiguation data. The expected data directory contains author-paper mappings, paper metadata, cross-source triplets, and train/validation/test splits.
 
+The processed KDD Cup data used by CrossND is available on Hugging Face:
+[canalpang/kddcup_for_crossnd](https://huggingface.co/datasets/canalpang/kddcup_for_crossnd).
+Download it and place the files under a local directory such as `kddcup_data/`.
+
 For KDD Cup-style experiments, the common files are:
 
 | File | Description |
@@ -69,7 +73,7 @@ For KDD Cup-style experiments, the common files are:
 | `valid_with_sim.json` | Validation triples with cross-source similarity |
 | `test_with_sim.json` | Test triples with cross-source similarity |
 
-The default scripts assume a local data directory such as `kddcup_data/`. Update paths in `train.sh`, `inf.sh`, and `cor/` commands before running.
+The default scripts assume the downloaded data is available at `kddcup_data/`. Update paths in `train.sh`, `inf.sh`, and `cor/` commands before running.
 
 ## Stage 1: Chain-of-Refinement
 
