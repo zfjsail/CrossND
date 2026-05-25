@@ -37,7 +37,13 @@ def paper_overlap_ratio(pids1, pids2):
 
 def build_turn_data(papers, num_turn, pred_scores=None, strategy='random'):
     """
-    将论文列表按 num_turn 分批，并根据策略对每批内部进行排序。
+    将论文列表按 num_turn 分批。
+
+    `turn_interleave_confidence_first` implements the TTS strategy used in
+    the paper: sort papers by confidence, distribute them across batches with
+    snake dealing, then interleave high- and low-confidence papers inside each
+    batch. If no preliminary scores are provided, the function falls back to a
+    random order.
 
     Returns:
         List[List[dict]]: 分批后的论文列表，每个元素是一个 turn 的论文列表
@@ -60,40 +66,8 @@ def build_turn_data(papers, num_turn, pred_scores=None, strategy='random'):
         v_ = copy.deepcopy(papers)
         random.shuffle(v_)
         return simple_split(v_)
-    
-    elif strategy == 'turn_interleave':
-        # 类希尔排序：先蛇形发牌使各批均匀，再每批内高低分交替排列
-        # 步骤1: 蛇形发牌（同 turn_balanced）
-        v_ = sorted(papers, key=get_score, reverse=True)
-        batches = [[] for _ in range(num_batches)]
-        for idx, paper in enumerate(v_):
-            cycle = idx // num_batches
-            pos_in_cycle = idx % num_batches
-            if cycle % 2 == 0:
-                batch_idx = pos_in_cycle
-            else:
-                batch_idx = num_batches - 1 - pos_in_cycle
-            batches[batch_idx].append(paper)
-        
-        # 步骤2: 每批内部高低分交替排列
-        result = []
-        for batch in batches:
-            if len(batch) <= 2:
-                result.append(batch)
-                continue
-            batch_sorted = sorted(batch, key=get_score, reverse=True)
-            interleaved = []
-            left, right = 0, len(batch_sorted) - 1
-            while left <= right:
-                interleaved.append(batch_sorted[left])
-                if left != right:
-                    interleaved.append(batch_sorted[right])
-                left += 1
-                right -= 1
-            result.append(interleaved)
-        return result
-    
-    elif strategy == 'turn_interleave_confidence_first':
+
+    if strategy == 'turn_interleave_confidence_first':
         # 类希尔排序+置信度：先按置信度蛇形发牌使各批均匀，再每批内高低置信度交替排列
         # 步骤1: 按置信度降序排序后蛇形发牌
         v_ = sorted(papers, key=get_confidence, reverse=True)
@@ -124,138 +98,11 @@ def build_turn_data(papers, num_turn, pred_scores=None, strategy='random'):
                 right -= 1
             result.append(interleaved)
         return result
-    
-    elif strategy == 'turn_interleave_v2':
-        # 类希尔排序v2：三段交替（高-低-中）
-        # 步骤1: 蛇形发牌
-        v_ = sorted(papers, key=get_score, reverse=True)
-        batches = [[] for _ in range(num_batches)]
-        for idx, paper in enumerate(v_):
-            cycle = idx // num_batches
-            pos_in_cycle = idx % num_batches
-            if cycle % 2 == 0:
-                batch_idx = pos_in_cycle
-            else:
-                batch_idx = num_batches - 1 - pos_in_cycle
-            batches[batch_idx].append(paper)
-        
-        # 步骤2: 每批内部按高-低-中三段交替
-        result = []
-        for batch in batches:
-            if len(batch) <= 3:
-                result.append(batch)
-                continue
-            batch_sorted = sorted(batch, key=get_score, reverse=True)
-            n = len(batch_sorted)
-            high = batch_sorted[:n//3]
-            mid = batch_sorted[n//3:2*n//3]
-            low = batch_sorted[2*n//3:]
-            
-            interleaved = []
-            for i in range(max(len(high), len(mid), len(low))):
-                if i < len(high):
-                    interleaved.append(high[i])
-                if i < len(low):
-                    interleaved.append(low[i])
-                if i < len(mid):
-                    interleaved.append(mid[i])
-            result.append(interleaved)
-        return result
-    
-    elif strategy == 'turn_interleave_reverse':
-        # 类希尔排序反向：低高分交替（先低后高）
-        # 步骤1: 蛇形发牌
-        v_ = sorted(papers, key=get_score, reverse=True)
-        batches = [[] for _ in range(num_batches)]
-        for idx, paper in enumerate(v_):
-            cycle = idx // num_batches
-            pos_in_cycle = idx % num_batches
-            if cycle % 2 == 0:
-                batch_idx = pos_in_cycle
-            else:
-                batch_idx = num_batches - 1 - pos_in_cycle
-            batches[batch_idx].append(paper)
-        
-        # 步骤2: 每批内部低高分交替排列（反向）
-        result = []
-        for batch in batches:
-            if len(batch) <= 2:
-                result.append(batch)
-                continue
-            batch_sorted = sorted(batch, key=get_score, reverse=True)
-            interleaved = []
-            left, right = 0, len(batch_sorted) - 1
-            while left <= right:
-                interleaved.append(batch_sorted[right])  # 先低分
-                if left != right:
-                    interleaved.append(batch_sorted[left])  # 后高分
-                left += 1
-                right -= 1
-            result.append(interleaved)
-        return result
-    
-    elif strategy == 'turn_interleave_confidence_v2':
-        # 类希尔排序+置信度v2：三段交替（高-低-中置信度）
-        # 步骤1: 按置信度蛇形发牌
-        v_ = sorted(papers, key=get_confidence, reverse=True)
-        batches = [[] for _ in range(num_batches)]
-        for idx, paper in enumerate(v_):
-            cycle = idx // num_batches
-            pos_in_cycle = idx % num_batches
-            if cycle % 2 == 0:
-                batch_idx = pos_in_cycle
-            else:
-                batch_idx = num_batches - 1 - pos_in_cycle
-            batches[batch_idx].append(paper)
-        
-        # 步骤2: 每批内部按高-低-中置信度三段交替
-        result = []
-        for batch in batches:
-            if len(batch) <= 3:
-                result.append(batch)
-                continue
-            batch_sorted = sorted(batch, key=get_confidence, reverse=True)
-            n = len(batch_sorted)
-            high = batch_sorted[:n//3]
-            mid = batch_sorted[n//3:2*n//3]
-            low = batch_sorted[2*n//3:]
-            
-            interleaved = []
-            for i in range(max(len(high), len(mid), len(low))):
-                if i < len(high):
-                    interleaved.append(high[i])
-                if i < len(low):
-                    interleaved.append(low[i])
-                if i < len(mid):
-                    interleaved.append(mid[i])
-            result.append(interleaved)
-        return result
-    
-    elif strategy == 'turn_balanced_confidence':
-        # 均匀分配（发牌策略）：按置信度排序后，轮流发给各批
-        # 使得每批的平均置信度尽量接近
-        # 然后每批内部按置信度降序排列
-        v_ = sorted(papers, key=get_confidence, reverse=True)
-        batches = [[] for _ in range(num_batches)]
-        
-        for idx, paper in enumerate(v_):
-            # 蛇形发牌
-            cycle = idx // num_batches
-            pos_in_cycle = idx % num_batches
-            if cycle % 2 == 0:
-                batch_idx = pos_in_cycle
-            else:
-                batch_idx = num_batches - 1 - pos_in_cycle
-            batches[batch_idx].append(paper)
-        
-        # 每批内部按置信度降序排列
-        return [sorted(batch, key=get_confidence, reverse=True) for batch in batches]
 
-    else:
-        print(f"Warning: Unknown TTS strategy '{strategy}', using random shuffle")
-        v_ = copy.deepcopy(papers)
-        random.shuffle(v_)
-        return simple_split(v_)
+    raise ValueError(
+        f"Unsupported TTS strategy: {strategy}. "
+        "Use 'random' or 'turn_interleave_confidence_first'."
+    )
 class CrossNDDataset(Dataset):
     """学者论文异常检测数据集"""
     

@@ -828,5 +828,5 @@ class ModelArguments:
     )
     tts_strategy: str = field(
         default="random",
-        metadata={"help": "TTS排序策略: random(随机), desc(降序), asc(升序), confidence(置信度), turn_interleave_confidence_first(置信度交替优先)等"}
+        metadata={"help": "TTS排序策略: random 或 turn_interleave_confidence_first"}
     )
