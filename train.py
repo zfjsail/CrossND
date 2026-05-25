@@ -32,10 +32,10 @@ from transformers import (
     set_seed,
 )
 
-from transformers import TrainingArguments, Trainer,EarlyStoppingCallback
+from transformers import TrainingArguments, EarlyStoppingCallback
 from trainer import DataArguments, ModelArguments, CrossNDTrainer_v2, compute_metrics, NumTurnScheduler
 
-from peft import get_peft_model, LoraConfig, TaskType, PeftModel
+from peft import get_peft_model, LoraConfig
 from utils import *
 from model import Qwen3ForCrossND
 
@@ -110,7 +110,10 @@ def main():
     else:
         dtype = torch.float32
             
-    # 根据模型路径选择合适的模型类
+    if model_args.loss_type not in {"ce", "psl"}:
+        raise ValueError("CrossND release code supports only loss_type='ce' or loss_type='psl'.")
+
+    # CrossND camera-ready experiments use Qwen3 as the backbone.
     model_path_lower = model_args.model_path.lower()
     if "qwen" in model_path_lower:
         logger.info(f"Initializing Qwen3ForCrossND model from {model_args.model_path}")
@@ -122,7 +125,7 @@ def main():
             attn_implementation="flash_attention_2"
         )
     else:
-        raise ValueError(f"Unsupported model type in path: {model_args.model_path}. Path should contain 'qwen' or 'llama'.")
+        raise ValueError(f"Unsupported model type in path: {model_args.model_path}. Path should contain 'qwen'.")
 
     if tokenizer.pad_token is None:
         special_token_dict["pad_token"] = DEFAULT_PAD_TOKEN
@@ -145,10 +148,7 @@ def main():
         model_args.modules_to_save = []
         
     if model_args.use_binary_head:
-        if model_args.loss_type == 'ls':
-            model_args.label_type = 'soft'
-        else:
-            model_args.label_type = 'hard'
+        model_args.label_type = 'hard'
         model.monkey_patch_cls_head()
         # model_args.modules_to_save = ["lm_head", "embed_tokens"]
     else:

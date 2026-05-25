@@ -1,9 +1,5 @@
 #!/bin/bash
 
-# 设置工作目录
-pip install -r requirements.txt
-
-
 # 设置训练设备
 DEEPSPEED_GPUS="localhost:0,1,2,3,4,5,6,7"
 # DEEPSPEED_GPUS="localhost:0"
@@ -12,13 +8,13 @@ DEEPSPEED_GPUS="localhost:0,1,2,3,4,5,6,7"
 MODEL_PATH="your/Qwen3-8B"
 # 注意: MODEL_PATH 需要指向 Qwen3-8B 模型的路径
 # 请下载模型并设置正确的路径,例如: "./models/Qwen3-8B" 或使用 Hugging Face 模型ID: "Qwen/Qwen3-8B"
-# MODEL_PATH="Qwen/Qwen3-8B"  # 可以使用 Hugging Face 模型ID,或修改为本地模型路径cd 
+# MODEL_PATH="Qwen/Qwen3-8B"
 # 数据文件路径(相对于 crossnd 目录)
 DATA_SRC="kddcup_data/alldata_nd_thr09_inout_sim.json"
 DATA_DIR="kddcup_data"
 OUTPUT_DIR="output/psl"
 RUN_NAME="psl"
-LOSS_TYPE="psl_v2"
+LOSS_TYPE="psl"
 NUM_TURN=10
 # LoRA配置
 LORA_R=16
@@ -65,7 +61,6 @@ deepspeed --master_port 29500  --include $DEEPSPEED_GPUS \
     --learning_rate $LEARNING_RATE \
     --weight_decay $WEIGHT_DECAY \
     --warmup_ratio $WARMUP_RATIO \
-    --warmup_ratio 0.1 \
     --save_strategy steps \
     --metric_for_best_model AUC_MAP \
     --greater_is_better true \

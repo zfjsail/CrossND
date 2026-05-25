@@ -31,12 +31,12 @@ from transformers import (
     HfArgumentParser,
     set_seed,
 )
-from transformers import TrainingArguments, Trainer,EarlyStoppingCallback
+from transformers import TrainingArguments, EarlyStoppingCallback
 from trainer import DataArguments, ModelArguments, CrossNDTrainer_v2, compute_metrics
 
-from peft import get_peft_model, LoraConfig, TaskType, PeftModel
+from peft import get_peft_model, LoraConfig
 from utils import *
-from model import Qwen3ForCrossND, LlamaForCrossND
+from model import Qwen3ForCrossND
 
 logging.basicConfig(
     level=logging.INFO,
@@ -109,7 +109,10 @@ def main():
     else:
         dtype = torch.float32
             
-    # 根据模型路径选择合适的模型类
+    if model_args.loss_type not in {"ce", "psl"}:
+        raise ValueError("CrossND release code supports only loss_type='ce' or loss_type='psl'.")
+
+    # CrossND camera-ready experiments use Qwen3 as the backbone.
     model_path_lower = model_args.model_path.lower()
     if "qwen" in model_path_lower:
         logger.info(f"Initializing Qwen3ForCrossND model from {model_args.model_path}")
@@ -120,17 +123,8 @@ def main():
             trust_remote_code=True,
             attn_implementation="flash_attention_2"
         ).cuda()
-    elif "llama" in model_path_lower:
-        logger.info(f"Initializing LlamaForCrossND model from {model_args.model_path}")
-        model = LlamaForCrossND.from_pretrained(
-            model_args.model_path, 
-            torch_dtype=dtype,
-            config=config, 
-            trust_remote_code=True,
-            attn_implementation="flash_attention_2"
-        ).cuda()
     else:
-        raise ValueError(f"Unsupported model type in path: {model_args.model_path}. Path should contain 'qwen' or 'llama'.")
+        raise ValueError(f"Unsupported model type in path: {model_args.model_path}. Path should contain 'qwen'.")
 
     if tokenizer.pad_token is None:
         special_token_dict["pad_token"] = DEFAULT_PAD_TOKEN
@@ -147,10 +141,7 @@ def main():
     )
     model.add_special_tokens(tokenizer)
     if model_args.use_binary_head:
-        if model_args.loss_type == 'ls':
-            model_args.label_type = 'soft'
-        else:
-            model_args.label_type = 'hard'
+        model_args.label_type = 'hard'
         model.monkey_patch_cls_head()
         # model_args.modules_to_save = ["lm_head", "embed_tokens"]
     else:
@@ -159,6 +150,7 @@ def main():
     if not model_args.freeze_header:
         model_args.modules_to_save = ["lm_head", "embed_tokens"]
     model.loss_type = model_args.loss_type
+    model.model_args = model_args
     test_dataset = CrossNDDataset(
         data_dir=data_args.data_dir,
         tokenizer=tokenizer,
@@ -213,17 +205,7 @@ def main():
     
 
 
-    for i in range(5):
-        set_seed(training_args.seed + i )
-        test_dataset = CrossNDDataset(
-            data_dir=data_args.data_dir,
-            tokenizer=tokenizer,
-            model_args = model_args,
-            data_args = data_args,
-            num_turn=model_args.num_turn,
-            mode="test",
-        )       
-        trainer.predict(test_dataset=test_dataset)
+    trainer.predict(test_dataset=test_dataset)
     
 if __name__ == "__main__":
     main()
