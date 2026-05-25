@@ -61,8 +61,6 @@ CrossND supports KDD Cup and WhoIsWho-style author disambiguation data. The expe
 The processed KDD Cup data used by CrossND is available on Hugging Face:
 [canalpang/kddcup_for_crossnd](https://huggingface.co/datasets/canalpang/kddcup_for_crossnd).
 Download it and place the files under a local directory such as `kddcup_data/`.
-The WhoIsWho dataset can be downloaded from the
-[KDD Cup 2024 IND competition page](https://www.biendata.xyz/competition/ind_kdd_2024/).
 
 For KDD Cup-style experiments, the common files are:
 
@@ -198,3 +196,8 @@ If you use this repository, please cite:
 ## License
 
 MIT License
+
+## WhoIsWho IND Benchmark
+
+The WhoIsWho IND benchmark is available at the
+[KDD Cup 2024 IND competition page](https://www.biendata.xyz/competition/ind_kdd_2024/).
