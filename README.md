@@ -178,6 +178,11 @@ The inference script evaluates paper-author correction scores and reports metric
 - `inference.py` supports evaluation with the trained CrossND model.
 - The current scripts are examples; update model, data, checkpoint, and API paths for your environment.
 
+## WhoIsWho IND Benchmark
+
+The WhoIsWho IND benchmark is available at the
+[KDD Cup 2024 IND competition page](https://www.biendata.xyz/competition/ind_kdd_2024/).
+
 ## Citation
 
 If you use this repository, please cite:
@@ -197,7 +202,3 @@ If you use this repository, please cite:
 
 MIT License
 
-## WhoIsWho IND Benchmark
-
-The WhoIsWho IND benchmark is available at the
-[KDD Cup 2024 IND competition page](https://www.biendata.xyz/competition/ind_kdd_2024/).
